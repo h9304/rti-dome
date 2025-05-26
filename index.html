@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Dome with Markers</title>
+  <title>WebXR AR Dome with Markers (mm)</title>
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   <!-- AR.js for WebXR AR -->
@@ -14,7 +14,7 @@
 <body style="margin: 0; overflow: hidden;">
   <!-- UI Overlay -->
   <div id="ui-panel" style="position: absolute; top:10px; left:10px; background: rgba(255,255,255,0.8); padding: 10px; z-index: 2; border-radius: 8px;">
-    <label>Target size (m): <input id="targetSize" type="number" value="1" step="0.1"></label><br>
+    <label>Target size (mm): <input id="targetSize" type="number" value="1000" step="1"></label><br>
     <label>Dome multiplier: <select id="multiplier">
       <option value="2">2×</option>
       <option value="3">3×</option>
@@ -45,13 +45,14 @@
 
     // Create dome and markers
     createBtn.addEventListener('click', () => {
-      // Clear previous
       while (container.firstChild) container.removeChild(container.firstChild);
-      const size = parseFloat(document.getElementById('targetSize').value);
+
+      const sizeMM = parseFloat(document.getElementById('targetSize').value);
+      const sizeM = sizeMM / 1000; // Convert mm to meters
       const mul = parseInt(document.getElementById('multiplier').value);
       const azs = document.getElementById('azimuths').value.split(',').map(a=>parseFloat(a));
       const els = document.getElementById('elevations').value.split(',').map(e=>parseFloat(e));
-      const radius = (size * mul) / 2;
+      const radius = (sizeM * mul) / 2;
 
       // Dome
       const dome = document.createElement('a-entity');
@@ -76,7 +77,6 @@
           marker.classList.add('clickable');
           container.appendChild(marker);
 
-          // Text label
           const label = document.createElement('a-text');
           label.setAttribute('value', `${az}°, ${el}°`);
           label.setAttribute('align', 'center');
@@ -84,7 +84,6 @@
           label.setAttribute('position', `${x} ${y+0.1} ${z}`);
           container.appendChild(label);
 
-          // Toggle on click
           marker.addEventListener('click', () => {
             const vis = label.getAttribute('visible');
             label.setAttribute('visible', !vis);
@@ -93,7 +92,6 @@
       });
     });
 
-    // Flash control
     flashBtn.addEventListener('click', async () => {
       const video = document.querySelector('video');
       if (!video) return;

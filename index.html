@@ -1,144 +1,44 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR Dome Debug</title>
+  <meta charset="utf-8">
+  <title>WebXR Support Checker</title>
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
-    #ui {
-      position: absolute;
-      top: 10px; left: 10px;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 10px;
-      border-radius: 8px;
-      z-index: 10;
+    body {
+      font-family: sans-serif;
+      background: #f0f0f0;
+      text-align: center;
+      padding-top: 40px;
     }
-    #flashBtn {
-      position: absolute;
-      top: 10px; right: 10px;
-      background: rgba(0, 0, 0, 0.6);
-      color: white; padding: 8px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      z-index: 10;
+    #status {
+      font-size: 1.5em;
+      background: white;
+      margin: auto;
+      padding: 20px;
+      border-radius: 10px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
     }
   </style>
 </head>
 <body>
-  <div id="ui">
-    <label>Target Size (mm): <input type="number" id="targetSize" value="100" /></label><br />
-    <label>Dome Multiplier:
-      <select id="sizeMultiplier">
-        <option value="2">2×</option>
-        <option value="3" selected>3×</option>
-        <option value="4">4×</option>
-      </select>
-    </label><br />
-    <label>Azimuths: <input type="text" id="azimuths" value="0,90,180,270" /></label><br />
-    <label>Elevations: <input type="text" id="elevations" value="45" /></label><br />
-    <button id="generate">Generate Dome</button>
-  </div>
-  <button id="flashBtn" disabled>Flash OFF</button>
-  <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-    import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
+  <div id="status">Checking WebXR AR support...</div>
+  <script>
+    const status = document.getElementById('status');
 
-    let camera, scene, renderer;
-    let domeGroup;
-    let videoTrack = null;
-    let torchOn = false;
-
-    init();
-
-    function init() {
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled = true;
-      document.body.appendChild(renderer.domElement);
-
-      document.body.appendChild(ARButton.createButton(renderer));
-
-      document.getElementById('generate').addEventListener('click', () => {
-        const size = parseFloat(document.getElementById('targetSize').value);
-        const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
-        const azimuths = document.getElementById('azimuths').value.split(',').map(a => parseFloat(a.trim()));
-        const elevations = document.getElementById('elevations').value.split(',').map(e => parseFloat(e.trim()));
-        generateDome(size * multiplier / 1000, azimuths, elevations);
-      });
-
-      document.getElementById('flashBtn').addEventListener('click', toggleFlash);
-
-      tryFlashAccess();
-
-      renderer.setAnimationLoop(() => {
-        renderer.render(scene, camera);
-      });
-    }
-
-    function generateDome(radius, azimuths, elevations) {
-      if (domeGroup) scene.remove(domeGroup);
-      domeGroup = new THREE.Group();
-
-      const domeMaterial = new THREE.MeshStandardMaterial({
-        color: 0x000000,
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.DoubleSide
-      });
-
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMaterial);
-      domeGroup.add(dome);
-
-      const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
-      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-
-      azimuths.forEach(az => {
-        elevations.forEach(el => {
-          const theta = THREE.MathUtils.degToRad(az);
-          const phi = THREE.MathUtils.degToRad(el);
-          const x = radius * Math.cos(phi) * Math.sin(theta);
-          const y = radius * Math.sin(phi);
-          const z = radius * Math.cos(phi) * Math.cos(theta);
-          const marker = new THREE.Mesh(markerGeo, markerMat);
-          marker.position.set(x, y, z);
-          marker.userData.label = `${az}°, ${el}°`;
-          marker.name = 'marker';
-          domeGroup.add(marker);
-        });
-      });
-
-      // place dome in front of camera
-      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      domeGroup.position.copy(camera.position).add(dir.multiplyScalar(0.5));
-      scene.add(domeGroup);
-    }
-
-    function tryFlashAccess() {
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
-        const track = stream.getVideoTracks()[0];
-        const capabilities = track.getCapabilities();
-        if (capabilities.torch) {
-          videoTrack = track;
-          document.getElementById('flashBtn').disabled = false;
+    if (!navigator.xr) {
+      status.textContent = '❌ WebXR not supported on this browser.';
+    } else {
+      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+        if (supported) {
+          status.textContent = '✅ WebXR AR is supported. You should be able to run AR content.';
+        } else {
+          status.textContent = '❌ WebXR AR not supported on this device or browser.';
         }
-      }).catch(() => {
-        document.getElementById('flashBtn').textContent = 'No Flash';
+      }).catch((err) => {
+        status.textContent = '⚠️ Error checking WebXR support: ' + err;
       });
-    }
-
-    function toggleFlash() {
-      if (!videoTrack) return;
-      torchOn = !torchOn;
-      videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
-        .then(() => {
-          document.getElementById('flashBtn').textContent = torchOn ? 'Flash ON' : 'Flash OFF';
-        })
-        .catch(() => alert('Flash toggle failed'));
     }
   </script>
 </body>

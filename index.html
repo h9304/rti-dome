@@ -1,44 +1,184 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WebXR Support Checker</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR AR Dome Final</title>
   <style>
-    body {
-      font-family: sans-serif;
-      background: #f0f0f0;
-      text-align: center;
-      padding-top: 40px;
+    body { margin:0; overflow:hidden; font-family:sans-serif; }
+    #ui {
+      position:absolute; top:10px; left:10px;
+      background:rgba(255,255,255,0.9);
+      padding:10px; border-radius:8px;
+      z-index:10; max-width:220px;
     }
-    #status {
-      font-size: 1.5em;
-      background: white;
-      margin: auto;
-      padding: 20px;
-      border-radius: 10px;
-      width: 90%;
-      max-width: 400px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    #flashBtn {
+      position:absolute; top:10px; right:10px;
+      background:rgba(0,0,0,0.6); color:white;
+      padding:8px; border-radius:6px;
+      font-size:14px; cursor:pointer; z-index:10;
     }
+    button { margin-top:8px; width:100%; }
   </style>
 </head>
 <body>
-  <div id="status">Checking WebXR AR support...</div>
-  <script>
-    const status = document.getElementById('status');
+  <div id="ui">
+    <label>Target Size (mm):<br><input type="number" id="targetSize" value="100"></label><br>
+    <label>Dome Multiplier:<br>
+      <select id="sizeMultiplier">
+        <option value="2">2×</option>
+        <option value="3" selected>3×</option>
+        <option value="4">4×</option>
+      </select>
+    </label><br>
+    <label>Azimuths (deg):<br><input type="text" id="azimuths" value="0,90,180,270"></label><br>
+    <label>Elevations (deg):<br><input type="text" id="elevations" value="45"></label><br>
+    <button id="generate">Generate Dome</button>
+  </div>
+  <button id="flashBtn" disabled>Flash OFF</button>
 
-    if (!navigator.xr) {
-      status.textContent = '❌ WebXR not supported on this browser.';
-    } else {
-      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-        if (supported) {
-          status.textContent = '✅ WebXR AR is supported. You should be able to run AR content.';
-        } else {
-          status.textContent = '❌ WebXR AR not supported on this device or browser.';
-        }
-      }).catch((err) => {
-        status.textContent = '⚠️ Error checking WebXR support: ' + err;
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
+
+    let camera, scene, renderer;
+    let domeGroup;
+    let videoTrack = null, torchOn = false;
+    let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+
+    init();
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+      document.body.appendChild(ARButton.createButton(renderer));
+
+      document.getElementById('generate').addEventListener('click', () => {
+        const radius = getRadius();
+        const azimuths = getArray('azimuths');
+        const elevations = getArray('elevations');
+        generateDome(radius, azimuths, elevations);
       });
+
+      document.getElementById('flashBtn').addEventListener('click', toggleFlash);
+      window.addEventListener('click', onSceneClick);
+
+      tryFlashAccess();
+
+      renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+      });
+    }
+
+    function getRadius() {
+      const size = parseFloat(document.getElementById('targetSize').value);
+      const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
+      return (size * multiplier) / 1000; // convert mm to m
+    }
+
+    function getArray(id) {
+      return document.getElementById(id).value.split(',').map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
+    }
+
+    function generateDome(radius, azimuths, elevations) {
+      if (domeGroup) scene.remove(domeGroup);
+      domeGroup = new THREE.Group();
+
+      const domeMat = new THREE.MeshStandardMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide
+      });
+
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+      domeGroup.add(dome);
+
+      const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+      azimuths.forEach(az => {
+        elevations.forEach(el => {
+          const theta = THREE.MathUtils.degToRad(az);
+          const phi = THREE.MathUtils.degToRad(el);
+          const x = radius * Math.cos(phi) * Math.sin(theta);
+          const y = radius * Math.sin(phi);
+          const z = radius * Math.cos(phi) * Math.cos(theta);
+          const marker = new THREE.Mesh(markerGeo, markerMat);
+          marker.position.set(x, y, z);
+          marker.userData.label = `${az}°, ${el}°`;
+          domeGroup.add(marker);
+        });
+      });
+
+      const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      domeGroup.position.copy(camera.position).add(direction.multiplyScalar(0.5));
+      scene.add(domeGroup);
+    }
+
+    function onSceneClick(e) {
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const intersects = raycaster.intersectObjects(scene.children, true);
+      if (intersects.length > 0) {
+        const obj = intersects[0].object;
+        if (obj.userData.label) {
+          if (!obj.userData.sprite) {
+            const sprite = makeTextSprite(obj.userData.label);
+            sprite.position.copy(obj.position).add(new THREE.Vector3(0, 0.05, 0));
+            scene.add(sprite);
+            obj.userData.sprite = sprite;
+          } else {
+            scene.remove(obj.userData.sprite);
+            delete obj.userData.sprite;
+          }
+        }
+      }
+    }
+
+    function makeTextSprite(message) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.font = '24px sans-serif';
+      canvas.width = ctx.measureText(message).width + 20;
+      canvas.height = 32;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'white';
+      ctx.fillText(message, 10, 24);
+      const texture = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture }));
+      sprite.scale.set(canvas.width / 200, canvas.height / 200, 1);
+      return sprite;
+    }
+
+    function tryFlashAccess() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities();
+        if (caps.torch) {
+          videoTrack = track;
+          document.getElementById('flashBtn').disabled = false;
+        }
+      }).catch(() => {
+        document.getElementById('flashBtn').textContent = 'No Flash';
+      });
+    }
+
+    function toggleFlash() {
+      if (!videoTrack) return;
+      torchOn = !torchOn;
+      videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
+        .then(() => {
+          document.getElementById('flashBtn').textContent = torchOn ? 'Flash ON' : 'Flash OFF';
+        })
+        .catch(() => alert('Flash toggle failed'));
     }
   </script>
 </body>

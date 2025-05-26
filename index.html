@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR AR Dome with Markers</title>
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <!-- AR.js for WebXR AR -->
+  <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js"></script>
+  <!-- A-Frame Super Hands for drag support -->
+  <script src="https://unpkg.com/super-hands@3.0.4/dist/super-hands.min.js"></script>
+</head>
+<body style="margin: 0; overflow: hidden;">
+  <!-- UI Overlay -->
+  <div id="ui-panel" style="position: absolute; top:10px; left:10px; background: rgba(255,255,255,0.8); padding: 10px; z-index: 2; border-radius: 8px;">
+    <label>Target size (m): <input id="targetSize" type="number" value="1" step="0.1"></label><br>
+    <label>Dome multiplier: <select id="multiplier">
+      <option value="2">2×</option>
+      <option value="3">3×</option>
+      <option value="4">4×</option>
+    </select></label><br>
+    <label>Azimuths (°, comma-separated):<br><input id="azimuths" type="text" value="0,90,180,270" style="width: 150px;"></label><br>
+    <label>Elevations (°, comma-separated):<br><input id="elevations" type="text" value="30,45" style="width: 150px;"></label><br>
+    <button id="createBtn">Create Dome</button>
+    <button id="flashBtn">Toggle Flash</button>
+  </div>
+
+  <a-scene embedded vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true;" arjs="sourceType: webcam; debugUIEnabled: false;">
+    <!-- Floor marker for placement -->
+    <a-entity id="floor" geometry="primitive: plane; width: 10; height: 10" rotation="-90 0 0" material="visible: false"></a-entity>
+    <!-- Container for dome and markers -->
+    <a-entity id="domeContainer" grabbable droppable stretchable draggable="constraint: move; debug: false"></a-entity>
+    <!-- Camera & cursor -->
+    <a-entity camera look-controls>
+      <a-entity cursor="fuse: false; rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
+    </a-entity>
+  </a-scene>
+
+  <script>
+    const createBtn = document.getElementById('createBtn');
+    const flashBtn = document.getElementById('flashBtn');
+    const container = document.getElementById('domeContainer');
+    let torchOn = false;
+
+    // Create dome and markers
+    createBtn.addEventListener('click', () => {
+      // Clear previous
+      while (container.firstChild) container.removeChild(container.firstChild);
+      const size = parseFloat(document.getElementById('targetSize').value);
+      const mul = parseInt(document.getElementById('multiplier').value);
+      const azs = document.getElementById('azimuths').value.split(',').map(a=>parseFloat(a));
+      const els = document.getElementById('elevations').value.split(',').map(e=>parseFloat(e));
+      const radius = (size * mul) / 2;
+
+      // Dome
+      const dome = document.createElement('a-entity');
+      dome.setAttribute('geometry', `primitive: sphere; radius: ${radius}; thetaLength: 180; segmentsWidth: 64; segmentsHeight: 32`);
+      dome.setAttribute('material', 'color: #000; opacity: 0.5; side: back; transparent: true');
+      dome.setAttribute('position', `0 ${radius} 0`);
+      container.appendChild(dome);
+
+      // Markers
+      azs.forEach(az => {
+        els.forEach(el => {
+          const azRad = THREE.Math.degToRad(az);
+          const elRad = THREE.Math.degToRad(el);
+          const x = radius * Math.cos(elRad) * Math.sin(azRad);
+          const y = radius * Math.sin(elRad) + radius;
+          const z = radius * Math.cos(elRad) * Math.cos(azRad);
+
+          const marker = document.createElement('a-sphere');
+          marker.setAttribute('radius', '0.05');
+          marker.setAttribute('color', 'yellow');
+          marker.setAttribute('position', `${x} ${y} ${z}`);
+          marker.classList.add('clickable');
+          container.appendChild(marker);
+
+          // Text label
+          const label = document.createElement('a-text');
+          label.setAttribute('value', `${az}°, ${el}°`);
+          label.setAttribute('align', 'center');
+          label.setAttribute('visible', 'false');
+          label.setAttribute('position', `${x} ${y+0.1} ${z}`);
+          container.appendChild(label);
+
+          // Toggle on click
+          marker.addEventListener('click', () => {
+            const vis = label.getAttribute('visible');
+            label.setAttribute('visible', !vis);
+          });
+        });
+      });
+    });
+
+    // Flash control
+    flashBtn.addEventListener('click', async () => {
+      const video = document.querySelector('video');
+      if (!video) return;
+      const track = video.srcObject.getVideoTracks()[0];
+      torchOn = !torchOn;
+      try {
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+      } catch(e) {
+        console.warn('Torch not supported', e);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,168 +1,144 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Dome</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebXR Dome Debug</title>
   <style>
-    body { margin:0; overflow:hidden; font-family:sans-serif; }
-    #ui { position:absolute; top:10px; left:10px; background:rgba(255,255,255,0.9); padding:10px; border-radius:8px; z-index:10; max-width:200px; }
-    #ui label { display:block; margin-bottom:6px; font-size:14px; }
-    #ui button { width:100%; padding:6px; margin-top:8px; font-size:14px; }
-    #flashBtn { position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.6); color:white; padding:8px; border-radius:6px; font-size:14px; cursor:pointer; z-index:10; }
-    .ar-button { position:absolute !important; bottom:20px !important; left:calc(50% - 50px) !important; width:100px !important; z-index:10; }
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    #ui {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 8px;
+      z-index: 10;
+    }
+    #flashBtn {
+      position: absolute;
+      top: 10px; right: 10px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white; padding: 8px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
   <div id="ui">
-    <label>Target Size (mm):<br><input type="number" id="targetSize" value="100" style="width:100%;"></label>
-    <label>Dome Multiple:<br><select id="sizeMultiplier" style="width:100%;"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
-    <label>Azimuths (deg):<br><input type="text" id="azimuths" value="0,45,90,135,180,225,270,315" style="width:100%;"></label>
-    <label>Elevations (deg):<br><input type="text" id="elevations" value="30,45,60" style="width:100%;"></label>
-    <button id="genBtn">Generate Dome</button>
+    <label>Target Size (mm): <input type="number" id="targetSize" value="100" /></label><br />
+    <label>Dome Multiplier:
+      <select id="sizeMultiplier">
+        <option value="2">2×</option>
+        <option value="3" selected>3×</option>
+        <option value="4">4×</option>
+      </select>
+    </label><br />
+    <label>Azimuths: <input type="text" id="azimuths" value="0,90,180,270" /></label><br />
+    <label>Elevations: <input type="text" id="elevations" value="45" /></label><br />
+    <button id="generate">Generate Dome</button>
   </div>
   <button id="flashBtn" disabled>Flash OFF</button>
-
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
-    import { DragControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/DragControls.js';
 
     let camera, scene, renderer;
-    let domeGroup = null;
-    let raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
-    let videoTrack=null, torchOn=false;
+    let domeGroup;
+    let videoTrack = null;
+    let torchOn = false;
 
     init();
 
     function init() {
-      scene=new THREE.Scene();
-      camera=new THREE.PerspectiveCamera();
-      renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled=true;
+      renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // AR 버튼 생성
-      const arBtn=ARButton.createButton(renderer);
-      arBtn.classList.add('ar-button');
-      document.body.appendChild(arBtn);
+      document.body.appendChild(ARButton.createButton(renderer));
 
-      // 컨트롤러(현재는 사용 안 함, 드래그로만 이동)
-      scene.add(renderer.xr.getController(0));
+      document.getElementById('generate').addEventListener('click', () => {
+        const size = parseFloat(document.getElementById('targetSize').value);
+        const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
+        const azimuths = document.getElementById('azimuths').value.split(',').map(a => parseFloat(a.trim()));
+        const elevations = document.getElementById('elevations').value.split(',').map(e => parseFloat(e.trim()));
+        generateDome(size * multiplier / 1000, azimuths, elevations);
+      });
 
-      // UI 이벤트
-      document.getElementById('genBtn').addEventListener('click', generateDome);
       document.getElementById('flashBtn').addEventListener('click', toggleFlash);
-      window.addEventListener('click', onSceneClick);
 
-      setupTorch();
+      tryFlashAccess();
 
-      renderer.setAnimationLoop(()=>{
-        renderer.render(scene,camera);
+      renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
       });
     }
 
-    async function setupTorch() {
-      try {
-        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-        const [track]=stream.getVideoTracks();
-        const caps=track.getCapabilities();
-        if(caps.torch) {
-          videoTrack=track;
-          const btn=document.getElementById('flashBtn');
-          btn.disabled=false; btn.textContent='Flash OFF';
+    function generateDome(radius, azimuths, elevations) {
+      if (domeGroup) scene.remove(domeGroup);
+      domeGroup = new THREE.Group();
+
+      const domeMaterial = new THREE.MeshStandardMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide
+      });
+
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMaterial);
+      domeGroup.add(dome);
+
+      const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+      azimuths.forEach(az => {
+        elevations.forEach(el => {
+          const theta = THREE.MathUtils.degToRad(az);
+          const phi = THREE.MathUtils.degToRad(el);
+          const x = radius * Math.cos(phi) * Math.sin(theta);
+          const y = radius * Math.sin(phi);
+          const z = radius * Math.cos(phi) * Math.cos(theta);
+          const marker = new THREE.Mesh(markerGeo, markerMat);
+          marker.position.set(x, y, z);
+          marker.userData.label = `${az}°, ${el}°`;
+          marker.name = 'marker';
+          domeGroup.add(marker);
+        });
+      });
+
+      // place dome in front of camera
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      domeGroup.position.copy(camera.position).add(dir.multiplyScalar(0.5));
+      scene.add(domeGroup);
+    }
+
+    function tryFlashAccess() {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
+        const track = stream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities();
+        if (capabilities.torch) {
+          videoTrack = track;
+          document.getElementById('flashBtn').disabled = false;
         }
-      } catch(e) {
-        document.getElementById('flashBtn').textContent='No Torch';
-      }
+      }).catch(() => {
+        document.getElementById('flashBtn').textContent = 'No Flash';
+      });
     }
 
     function toggleFlash() {
-      if(!videoTrack) return;
-      torchOn=!torchOn;
-      videoTrack.applyConstraints({advanced:[{torch:torchOn}]})
-        .then(()=>document.getElementById('flashBtn').textContent=torchOn?'Flash ON':'Flash OFF')
-        .catch(()=>alert('Flash control not supported'));
-    }
-
-    function generateDome() {
-      const ts=parseFloat(document.getElementById('targetSize').value);
-      const mul=parseFloat(document.getElementById('sizeMultiplier').value);
-      const azs=document.getElementById('azimuths').value.split(',').map(v=>parseFloat(v.trim())).filter(v=>!isNaN(v));
-      const els=document.getElementById('elevations').value.split(',').map(v=>parseFloat(v.trim())).filter(v=>!isNaN(v));
-      const radius=(ts/1000)*mul;
-
-      // 이전 돔 제거
-      if(domeGroup) scene.remove(domeGroup);
-      domeGroup=new THREE.Group();
-
-      // 돔 생성
-      const outer=new THREE.Mesh(
-        new THREE.SphereGeometry(radius,32,16,0,Math.PI*2,0,Math.PI/2),
-        new THREE.MeshStandardMaterial({color:0x000000,transparent:true,opacity:0.3,side:THREE.DoubleSide})
-      );
-      const inner=new THREE.Mesh(
-        new THREE.SphereGeometry(radius-0.01,32,16,0,Math.PI*2,0,Math.PI/2),
-        new THREE.MeshStandardMaterial({color:0x000000,transparent:true,opacity:0.3,side:THREE.DoubleSide})
-      );
-      domeGroup.add(outer,inner);
-
-      // 마커 생성
-      const mGeo=new THREE.SphereGeometry(0.03,16,16);
-      const mMat=new THREE.MeshBasicMaterial({color:0xffff00});
-      azs.forEach(az=>els.forEach(el=>{
-        const theta=THREE.MathUtils.degToRad(az), phi=THREE.MathUtils.degToRad(el);
-        const x=radius*Math.cos(phi)*Math.sin(theta);
-        const y=radius*Math.sin(phi);
-        const z=radius*Math.cos(phi)*Math.cos(theta);
-        const marker=new THREE.Mesh(mGeo,mMat);
-        marker.position.set(x,y,z);
-        marker.userData={azimuth:az,elevation:el};
-        domeGroup.add(marker);
-      }));
-
-      // 카메라 앞 0.5m 위치에 돔 배치
-      const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-      domeGroup.position.copy(camera.position).add(dir.multiplyScalar(0.5));
-      scene.add(domeGroup);
-      new DragControls([domeGroup], camera, renderer.domElement);
-    }
-
-    function onSceneClick(event) {
-      // 라벨 토글
-      pointer.x=(event.clientX/window.innerWidth)*2-1;
-      pointer.y=-(event.clientY/window.innerHeight)*2+1;
-      raycaster.setFromCamera(pointer,camera);
-      const hits=raycaster.intersectObjects(scene.children,true);
-      if(hits.length>0) {
-        const obj=hits[0].object;
-        if(obj.userData.azimuth!=null) {
-          // 토글 라벨
-          if(obj.userData.labelSprite) {
-            obj.remove(obj.userData.labelSprite);
-            delete obj.userData.labelSprite;
-          } else {
-            const txt=`${obj.userData.azimuth}° / ${obj.userData.elevation}°`;
-            const sprite=makeTextSprite(txt);
-            sprite.position.copy(obj.position).add(new THREE.Vector3(0,0.05,0));
-            obj.add(sprite);
-            obj.userData.labelSprite=sprite;
-          }
-        }
-      }
-    }
-
-    function makeTextSprite(text) {
-      const canvas=document.createElement('canvas'); const ctx=canvas.getContext('2d');
-      ctx.font='24px sans-serif'; const w=ctx.measureText(text).width;
-      canvas.width=w+20; canvas.height=32;
-      ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle='white'; ctx.fillText(text,10,24);
-      const tex=new THREE.CanvasTexture(canvas);
-      const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex}));
-      sprite.scale.set(canvas.width/200,canvas.height/200,1);
-      return sprite;
+      if (!videoTrack) return;
+      torchOn = !torchOn;
+      videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
+        .then(() => {
+          document.getElementById('flashBtn').textContent = torchOn ? 'Flash ON' : 'Flash OFF';
+        })
+        .catch(() => alert('Flash toggle failed'));
     }
   </script>
 </body>

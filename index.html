@@ -1,9 +1,9 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v3 Stable - Torch Debug)</title>
+    <title>WebXR RTI Dome (v3 Stable - Updated Features)</title>
     <style>
         body { 
             margin: 0; 
@@ -188,7 +188,6 @@
     <div id="arModeControls">
         <button id="arSettingsButton">입력값</button>
         <button id="resetDomePositionButton">돔 위치 재설정</button>
-        <button id="torchButton">손전등 켜기</button>
     </div>
 
     <div id="settingsModal">
@@ -245,7 +244,6 @@
         const inputContainer = document.getElementById('inputContainer');
         const arModeControls = document.getElementById('arModeControls');
         const settingsModal = document.getElementById('settingsModal');
-        const torchButton = document.getElementById('torchButton');
         const resetDomePositionButton = document.getElementById('resetDomePositionButton');
 
         let placementRequested = false;
@@ -253,8 +251,6 @@
 
         let isDraggingDome = false;
         let activePointerId = null; 
-        let currentStream = null; 
-        let isTorchOn = false;
 
         function showStatus(message, duration = 3000) {
             if (statusMessageEl) { 
@@ -338,7 +334,6 @@
             });
 
             document.getElementById('arSettingsButton').addEventListener('click', openSettingsModal);
-            torchButton.addEventListener('click', toggleTorch);
             document.getElementById('applyModalSettingsButton').addEventListener('click', applySettingsFromModal);
             document.getElementById('closeModalButton').addEventListener('click', closeSettingsModal);
             
@@ -365,13 +360,26 @@
                     const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
                     hitTestSource = await session.requestHitTestSource({ 
                         space: viewerReferenceSpace,
+                        entityTypes: ['plane'] // Explicitly request planes
                     });
                     if (!hitTestSource) {
-                        showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다.", 4000);
+                        showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다. (plane entityTypes)", 4000);
                     }
                 } catch (error) {
-                    console.error("Hit-test source 요청 실패:", error);
-                    showStatus("Hit-test를 시작할 수 없습니다. AR 기능이 제한될 수 있습니다.", 4000);
+                    console.error("Hit-test source 요청 실패 (plane entityTypes):", error);
+                    // Fallback to general hit-test if plane-specific fails or not supported
+                    try {
+                        const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
+                        hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace });
+                        if (!hitTestSource) {
+                            showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다. (fallback)", 4000);
+                        } else {
+                            showStatus("표면 감지: 일반 모드로 전환됨.", 2000);
+                        }
+                    } catch (fallbackError) {
+                        console.error("Fallback Hit-test source 요청 실패:", fallbackError);
+                        showStatus("Hit-test를 시작할 수 없습니다. AR 기능이 제한될 수 있습니다.", 4000);
+                    }
                 }
             });
 
@@ -384,17 +392,6 @@
                 inputContainer.style.display = 'flex';
                 arModeControls.style.display = 'none';
                 closeSettingsModal();
-                
-                if (isTorchOn) { 
-                    controlTorch(false); 
-                } else if (currentStream) { 
-                    currentStream.getTracks().forEach(track => {
-                        if (track.readyState === 'live') track.stop();
-                    });
-                    currentStream = null;
-                }
-                isTorchOn = false; 
-                torchButton.textContent = "손전등 켜기";
             });
             showStatus("AR 세션을 시작하고, 바닥이나 벽을 탭하여 돔을 배치하세요.", 5000); 
         }
@@ -511,13 +508,29 @@
 
                     const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
                     marker.position.set(x, y, z);
+                    
+                    // Create and add number label by default
+                    const numberLabelText = `${markerCount}`;
+                    const numberLabelMesh = createTextSprite(numberLabelText, {
+                        fontsize: 24, // Smaller font for numbers
+                        fontface: "Arial",
+                        textColor: { r: 255, g: 255, b: 0, a: 1.0 }, // Yellow numbers
+                        backgroundColor: { r: 0, g: 0, b: 0, a: 0.0 } // Transparent background
+                    });
+                    const numberLabelScaleFactor = actualRadius * 0.035;
+                    numberLabelMesh.scale.set(numberLabelScaleFactor, numberLabelScaleFactor, numberLabelScaleFactor);
+                    const numberLabelOffset = marker.position.clone().normalize().multiplyScalar(markerRadius * 1.8); // Position slightly outwards
+                    numberLabelMesh.position.copy(marker.position).add(numberLabelOffset);
+                    newDomeGroup.add(numberLabelMesh);
+
                     marker.userData = { 
                         isLightMarker: true, 
                         azimuth: az, 
                         elevation: el, 
-                        labelMesh: null, 
-                        isLabelVisible: false,
-                        number: markerCount 
+                        number: markerCount,
+                        numberLabelMesh: numberLabelMesh, // Store reference
+                        azElLabelMesh: null, 
+                        isAzElLabelVisible: false,
                     };
                     newDomeGroup.add(marker);
                 });
@@ -539,7 +552,7 @@
                 if (intersects.length > 0) {
                     const firstIntersected = intersects[0].object;
                     if (firstIntersected.userData.isLightMarker) {
-                        toggleMarkerLabel(firstIntersected);
+                        toggleMarkerAzElLabel(firstIntersected); // Changed function name
                         return; 
                     }
                 }
@@ -554,33 +567,44 @@
             }
         }
         
-        function toggleMarkerLabel(marker) {
-            marker.userData.isLabelVisible = !marker.userData.isLabelVisible;
-            if (marker.userData.isLabelVisible) {
-                if (!marker.userData.labelMesh) {
-                    const labelText = `${marker.userData.number}`; 
-                    marker.userData.labelMesh = createTextSprite(labelText, { 
-                        fontsize: 32, 
+        // Renamed and modified to handle Az/El label
+        function toggleMarkerAzElLabel(marker) {
+            marker.userData.isAzElLabelVisible = !marker.userData.isAzElLabelVisible;
+
+            if (marker.userData.isAzElLabelVisible) {
+                if (!marker.userData.azElLabelMesh) {
+                    const labelText = `${marker.userData.azimuth}°, ${marker.userData.elevation}°`; 
+                    marker.userData.azElLabelMesh = createTextSprite(labelText, { 
+                        fontsize: 28, 
                         fontface: "Arial", 
                         textColor: { r:255, g:255, b:255, a:1.0 },
                         backgroundColor: { r:30, g:30, b:30, a:0.8 }
                     });
                     
                     const domeRadius = domeGroup.children.find(c => c.userData.isDomePart)?.geometry.parameters.radius || 1;
-                    const labelScaleFactor = domeRadius * 0.05; 
-                    marker.userData.labelMesh.scale.set(labelScaleFactor, labelScaleFactor, labelScaleFactor); 
+                    const labelScaleFactor = domeRadius * 0.06; 
+                    marker.userData.azElLabelMesh.scale.set(labelScaleFactor * 2.5, labelScaleFactor, labelScaleFactor); 
 
-                    const offsetDirection = marker.position.clone().normalize();
-                    const offsetDistance = marker.geometry.parameters.radius * 2.5;
-                    const labelPosition = marker.position.clone().add(offsetDirection.multiplyScalar(offsetDistance));
-                    marker.userData.labelMesh.position.copy(labelPosition);
+                    // Position Az/El label slightly below the number label or marker
+                    const offsetDirection = marker.position.clone().normalize(); // Outwards from dome center
+                    const azElLabelOffset = marker.userData.numberLabelMesh.position.clone().sub(marker.position).normalize().multiplyScalar(-0.03); // Example: slightly below number
                     
-                    domeGroup.add(marker.userData.labelMesh); 
+                    // Alternative: Position relative to marker, slightly offset from number
+                    const basePosition = marker.userData.numberLabelMesh.position.clone();
+                    const downOffset = new THREE.Vector3(0, -labelScaleFactor * 1.2, 0); // Offset downwards in sprite's local space (approx)
+                    
+                    // We need to transform this downOffset to world space relative to domeGroup orientation
+                    // This is tricky for sprites. Simpler: position relative to marker.
+                    const azElLabelPosition = marker.position.clone().add(offsetDirection.multiplyScalar(markerRadius * 1.5 + 0.02)); // Slightly further out and lower
+
+                    marker.userData.azElLabelMesh.position.copy(azElLabelPosition);
+                    
+                    domeGroup.add(marker.userData.azElLabelMesh); 
                 }
-                marker.userData.labelMesh.visible = true;
+                marker.userData.azElLabelMesh.visible = true;
             } else {
-                if (marker.userData.labelMesh) {
-                    marker.userData.labelMesh.visible = false;
+                if (marker.userData.azElLabelMesh) {
+                    marker.userData.azElLabelMesh.visible = false;
                 }
             }
         }
@@ -592,7 +616,7 @@
             const borderColor = parameters.borderColor || { r:0, g:0, b:0, a:0.0 };
             const backgroundColor = parameters.backgroundColor || { r:0, g:0, b:0, a:0.5 };
             const textColor = parameters.textColor || { r:255, g:255, b:255, a:1.0 };
-            const padding = parameters.padding || 10;
+            const padding = parameters.padding || 8; // Reduced padding for smaller labels
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             context.font = `Bold ${fontsize}px ${fontface}`;
@@ -604,7 +628,7 @@
             context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
             context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
             context.lineWidth = borderThickness;
-            const radius = 8; 
+            const radius = 6; // Smaller radius
             context.beginPath();
             context.moveTo(radius + borderThickness, borderThickness);
             context.lineTo(canvas.width - radius - borderThickness, borderThickness);
@@ -624,9 +648,10 @@
             context.fillText(message, canvas.width / 2, canvas.height / 2);
             const texture = new THREE.CanvasTexture(canvas);
             texture.needsUpdate = true;
-            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: backgroundColor.a < 1.0 });
             const sprite = new THREE.Sprite(spriteMaterial);
-            sprite.scale.set(canvas.width / 100, canvas.height / 100, 1.0); 
+            // Scale based on font size to maintain relative appearance
+            sprite.scale.set(canvas.width / (fontsize * 5) , canvas.height / (fontsize * 5), 1.0); 
             return sprite;
         }
 
@@ -671,99 +696,6 @@
         function closeSettingsModal(){settingsModal.style.display='none';}
         function applySettingsFromModal(){targetSize=parseFloat(document.getElementById('modalTargetSize').value)||100;radiusMultiplier=parseFloat(document.getElementById('modalRadiusMultiplier').value)||3;azimuths=document.getElementById('modalAzimuths').value.split(',').map(Number).filter(n=>!isNaN(n));elevations=document.getElementById('modalElevations').value.split(',').map(Number).filter(n=>!isNaN(n));document.getElementById('targetSize').value=targetSize;document.getElementById('radiusMultiplier').value=radiusMultiplier;document.getElementById('azimuths').value=azimuths.join(',');document.getElementById('elevations').value=elevations.join(',');closeSettingsModal();showStatus("설정 적용됨.",2500);if(renderer.xr.isPresenting&&domeGroup){updateAndPlaceDome();}}
         
-        async function controlTorch(enable) {
-            console.log(`controlTorch 호출됨 - enable: ${enable}, 현재 스트림: ${currentStream ? '있음' : '없음'}, 현재 손전등 상태: ${isTorchOn}`);
-
-            if (enable && !currentStream) { 
-                 try {
-                    console.log("손전등을 켜기 위해 카메라 스트림을 요청합니다...");
-                    currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                    console.log("카메라 스트림 확보 성공.");
-                 } catch(err) {
-                    console.error("getUserMedia 실패 (손전등용):", err.name, err.message);
-                    showStatus("손전등 제어 불가: 카메라 접근 실패 - " + err.name, 3000);
-                    currentStream = null; 
-                    return false; 
-                 }
-            } else if (!currentStream && !enable) { 
-                console.log("손전등 제어: 끄기 요청, 하지만 스트림 없음 (이미 꺼져있거나 확보 안됨).");
-                isTorchOn = false;
-                torchButton.textContent = "손전등 켜기";
-                return true; 
-            } else if (!currentStream && enable) { 
-                console.warn("손전등 제어: 켜기 요청, 하지만 스트림이 예기치 않게 null입니다.");
-                showStatus("손전등 오류: 카메라 스트림 없음", 2500);
-                return false;
-            }
-
-            if (!currentStream) { 
-                console.error("손전등 제어: 치명적 오류 - currentStream이 null입니다.");
-                showStatus("손전등 시스템 오류", 2500);
-                return false;
-            }
-
-            const videoTracks = currentStream.getVideoTracks();
-            if (!videoTracks || videoTracks.length === 0) {
-                showStatus("손전등 제어 불가: 비디오 트랙 없음", 2500);
-                console.warn("손전등 제어: 스트림에서 비디오 트랙을 찾을 수 없습니다.");
-                 if (!enable) { 
-                    currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                    currentStream = null;
-                    console.log("비디오 트랙이 없어 손전등을 끄면서 스트림을 정리했습니다.");
-                    isTorchOn = false;
-                    torchButton.textContent = "손전등 켜기";
-                }
-                return false;
-            }
-            const videoTrack = videoTracks[0];
-
-            const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-            console.log("비디오 트랙 기능:", JSON.stringify(capabilities));
-
-            if (!capabilities.torch) {
-                showStatus("이 기기/브라우저에서는 손전등 기능을 지원하지 않습니다.", 3000);
-                console.warn("손전등 제어: 비디오 트랙에서 torch 기능을 지원하지 않습니다.");
-                currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                currentStream = null;
-                console.log("torch 기능 미지원으로 스트림을 정리했습니다.");
-                isTorchOn = false; 
-                torchButton.textContent = "손전등 켜기";
-                return false;
-            }
-
-            try {
-                console.log(`torch 제약 조건 적용 시도: ${enable}`);
-                await videoTrack.applyConstraints({
-                    advanced: [{ torch: enable }]
-                });
-                isTorchOn = enable;
-                torchButton.textContent = enable ? "손전등 끄기" : "손전등 켜기";
-                showStatus(enable ? "손전등 켜짐" : "손전등 꺼짐", 1500);
-                console.log(`torch 제약 조건 적용 성공. isTorchOn: ${isTorchOn}`);
-
-                if (!enable) { 
-                    console.log("손전등을 끈 후 카메라 스트림을 해제합니다.");
-                    currentStream.getTracks().forEach(track => {
-                        if (track.readyState === 'live') track.stop();
-                    });
-                    currentStream = null;
-                }
-                return true;
-            } catch (err) {
-                console.error("applyConstraints 실패 (손전등용):", err.name, err.message);
-                showStatus("손전등 제어 중 오류 발생: " + err.name, 3000);
-                if (currentStream) {
-                    currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                    currentStream = null;
-                    console.log("손전등 제어 실패 후 스트림을 정리했습니다.");
-                }
-                isTorchOn = false; 
-                torchButton.textContent = "손전등 켜기";
-                return false;
-            }
-        }
-        async function toggleTorch(){await controlTorch(!isTorchOn);}
-
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();

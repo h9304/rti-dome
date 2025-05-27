@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v2 with Debugging)</title>
+    <title>WebXR RTI Dome (v3 Stable)</title>
     <style>
         body { 
             margin: 0; 
@@ -239,6 +239,9 @@
         const settingsModal = document.getElementById('settingsModal');
         const torchButton = document.getElementById('torchButton');
 
+        // *** NEW ***: Flag to request placement from the render loop
+        let placementRequested = false;
+
         let isDraggingDome = false;
         let activePointerId = null; 
         let currentStream = null;
@@ -248,7 +251,6 @@
         animate();
 
         function init() {
-            console.log("Initializing application...");
             scene = new THREE.Scene();
             scene.add(new THREE.AmbientLight(0x888888,1));
             const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -264,14 +266,12 @@
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
-            console.log("Reticle created and added to scene.");
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
-            console.log("Renderer initialized.");
 
             const arButtonElement = ARButton.createButton(renderer, {
                 requiredFeatures: ['hit-test', 'dom-overlay'],
@@ -281,12 +281,10 @@
             document.body.appendChild(arButtonElement);
             arButtonElement.id = 'arButton';
             arButtonElement.style.display = 'block';
-            console.log("ARButton created.");
 
             controller = renderer.xr.getController(0);
             controller.addEventListener('selectstart', onSelectStart);
             scene.add(controller);
-            console.log("Controller initialized and 'selectstart' listener added.");
 
             // Input listeners
             document.getElementById('targetSize').addEventListener('input', (e) => targetSize = parseFloat(e.target.value) || 100);
@@ -312,7 +310,6 @@
             radiusMultiplier = parseFloat(document.getElementById('radiusMultiplier').value);
             azimuths = document.getElementById('azimuths').value.split(',').map(Number).filter(n => !isNaN(n));
             elevations = document.getElementById('elevations').value.split(',').map(Number).filter(n => !isNaN(n));
-            console.log("Initial parameters set from HTML.");
 
             // Pointer events for dome dragging
             renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
@@ -324,7 +321,6 @@
 
             // Handle XR session start/end
             renderer.xr.addEventListener('sessionstart', async () => {
-                console.log("XR session started.");
                 const session = renderer.xr.getSession();
                 showStatus("AR 세션 시작됨. 표면을 찾아 레티클을 조준하고 탭하여 돔 배치.", 0);
                 inputContainer.style.display = 'none';
@@ -332,14 +328,7 @@
 
                 try {
                     const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
-                    console.log("Viewer reference space acquired.");
                     hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace });
-                    if (hitTestSource) {
-                        console.log("Hit-test source acquired successfully.");
-                    } else {
-                        showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다.", 4000);
-                        console.warn("Hit-test source was not acquired (returned null or undefined).");
-                    }
                 } catch (error) {
                     console.error("Hit-test source 요청 실패:", error);
                     showStatus("Hit-test를 시작할 수 없습니다. AR 기능이 제한될 수 있습니다.", 4000);
@@ -349,7 +338,6 @@
                     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                         currentStream = stream;
-                        console.log("Camera stream for torch acquired.");
                     }
                 } catch (err) {
                     console.warn("카메라 접근 실패 (손전등용):", err);
@@ -357,7 +345,6 @@
             });
 
             renderer.xr.addEventListener('sessionend', () => {
-                console.log("XR session ended.");
                 hitTestSource = null;
                 reticle.visible = false;
                 clearDomeAndChildren();
@@ -373,102 +360,69 @@
                         if (track.readyState === 'live') track.stop();
                     });
                     currentStream = null;
-                    console.log("Camera stream released on session end (torch was not active).");
                 }
                 isTorchOn = false;
                 torchButton.textContent = "손전등 켜기";
             });
             showStatus("AR 세션을 시작하고, 바닥이나 벽을 탭하여 돔을 배치하세요.", 5000);
-            console.log("Initialization complete.");
         }
         
-        function updateAndPlaceDome(hitMatrix = null) {
-            console.log("updateAndPlaceDome called.");
-            if (hitMatrix) console.log("hitMatrix provided."); else console.log("No hitMatrix provided (updating existing dome).");
-
+        function updateAndPlaceDome(hitMatrix = null, frameForAnchor = null) {
             const tempWorldPos = new THREE.Vector3(); 
 
-            if (domeGroup && domeGroup.userData.anchor && !hitMatrix) {
-                const existingAnchor = domeGroup.userData.anchor;
-                clearDomeAndChildren();
-                domeGroup = createDome();
-                domeGroup.userData.anchor = existingAnchor;
-                scene.add(domeGroup);
-                showStatus("돔 설정 업데이트 완료.", 2000);
-                console.log("Existing anchored dome updated.");
-            } else if (domeGroup && !domeGroup.userData.anchor && !hitMatrix) {
+            if (domeGroup && !hitMatrix) { // Update existing dome
+                const oldAnchor = domeGroup.userData.anchor;
                 const oldPosition = domeGroup.position.clone();
                 const oldQuaternion = domeGroup.quaternion.clone();
                 clearDomeAndChildren();
                 domeGroup = createDome();
-                domeGroup.position.copy(oldPosition);
-                domeGroup.quaternion.copy(oldQuaternion);
+                if (oldAnchor) {
+                    domeGroup.userData.anchor = oldAnchor;
+                } else {
+                    domeGroup.position.copy(oldPosition);
+                    domeGroup.quaternion.copy(oldQuaternion);
+                }
                 scene.add(domeGroup);
-                showStatus("돔 설정 업데이트 완료. (앵커 없음)", 2000);
-                console.log("Existing non-anchored dome updated.");
-            } else if (hitMatrix) {
+                showStatus("돔 설정 업데이트 완료.", 2000);
+            } else if (hitMatrix) { // Place new dome
                 clearDomeAndChildren();
                 domeGroup = createDome();
                 const domeRadiusVal = domeGroup.children[0]?.geometry.parameters.radius.toFixed(3) || "N/A";
 
-                const session = renderer.xr.getSession();
-                const frame = renderer.xr.getFrame();
                 const referenceSpace = renderer.xr.getReferenceSpace();
-
-                if (session && frame && referenceSpace && hitMatrix.userData?.hitTestResult) {
-                    console.log("Attempting to create anchor for new dome.");
+                if (frameForAnchor && referenceSpace && hitMatrix.userData?.hitTestResult) {
                     const hit = hitMatrix.userData.hitTestResult;
                     hit.createAnchor().then(anchor => {
                         domeGroup.userData.anchor = anchor;
                         scene.add(domeGroup);
                         
-                        const anchorPose = frame.getPose(anchor.anchorSpace, referenceSpace);
+                        const anchorPose = frameForAnchor.getPose(anchor.anchorSpace, referenceSpace);
                         if (anchorPose) {
                             const anchorMatrix = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
                             anchorMatrix.decompose(tempWorldPos, new THREE.Quaternion(), new THREE.Vector3());
-                            console.log(`Dome ANCHORED. World Pos (approx): ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Visible: ${domeGroup.visible}. Radius: ${domeRadiusVal}`);
-                        } else {
-                            console.log(`Dome ANCHORED but initial pose not available for logging. Visible: ${domeGroup.visible}. Radius: ${domeRadiusVal}`);
+                            console.log(`Dome ANCHORED. World Pos (approx): ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Radius: ${domeRadiusVal}`);
                         }
-                        reticle.visible = false;
                         showStatus("돔 배치 완료 (앵커 사용).", 3000);
                     }).catch(err => {
                         console.warn("앵커 생성 실패:", err);
                         domeGroup.applyMatrix4(hitMatrix);
                         scene.add(domeGroup);
                         domeGroup.getWorldPosition(tempWorldPos);
-                        console.log(`Dome MATRIX-PLACED (anchor failed). World Pos: ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Visible: ${domeGroup.visible}. Radius: ${domeRadiusVal}`);
-                        reticle.visible = true; 
+                        console.log(`Dome MATRIX-PLACED (anchor failed). World Pos: ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Radius: ${domeRadiusVal}`);
                         showStatus("돔 배치 완료 (앵커 실패, 직접 배치).", 3000);
                     });
                 } else { 
                     domeGroup.applyMatrix4(hitMatrix);
                     scene.add(domeGroup);
                     domeGroup.getWorldPosition(tempWorldPos);
-                    console.log(`Dome MATRIX-PLACED (no anchor info). World Pos: ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Visible: ${domeGroup.visible}. Radius: ${domeRadiusVal}`);
-                    reticle.visible = true; 
+                    console.log(`Dome MATRIX-PLACED (no anchor info). World Pos: ${tempWorldPos.x.toFixed(2)},${tempWorldPos.y.toFixed(2)},${tempWorldPos.z.toFixed(2)}. Radius: ${domeRadiusVal}`);
                     showStatus("돔 배치 완료 (앵커 정보 없음).", 3000);
                 }
-            } else {
-                 showStatus("돔을 먼저 배치하세요. 레티클을 바닥/벽에 조준하고 탭하세요.", 3000);
-                 console.log("updateAndPlaceDome: No dome to update and no hitMatrix to place new one.");
-            }
-        }
-
-        function showStatus(message, duration = 3000) {
-            statusMessage.textContent = message;
-            statusMessage.style.display = 'block';
-            if (statusMessage.timeoutId) clearTimeout(statusMessage.timeoutId);
-            if (duration > 0) {
-                statusMessage.timeoutId = setTimeout(() => {
-                    statusMessage.style.display = 'none';
-                }, duration);
             }
         }
         
         function clearDomeAndChildren() {
             if (!domeGroup) return;
-            console.log("Clearing previous dome...");
             domeGroup.traverse(child => {
                 if (child.isMesh) {
                     if (child.geometry) child.geometry.dispose();
@@ -485,9 +439,7 @@
                 }
             });
             scene.remove(domeGroup);
-            domeGroup.userData.anchor = null; 
             domeGroup = null;
-            console.log("Previous dome cleared.");
         }
 
         function createDome() {
@@ -524,59 +476,13 @@
             });
             newDomeGroup.userData.isDomeRoot = true;
             newDomeGroup.userData.anchor = null; 
-            console.log(`Dome created with radius: ${actualRadius.toFixed(3)}m`);
             return newDomeGroup;
         }
 
+        // *** MODIFIED ***: onSelectStart now only sets a flag
         function onSelectStart(event) {
-            console.log("onSelectStart triggered!"); // 1. 함수 호출 확인
-            const session = renderer.xr.getSession();
-            if (!session) {
-                console.log("onSelectStart: No XR session.");
-                return;
-            }
-
-            console.log(`onSelectStart: hitTestSource available? ${!!hitTestSource}, reticle visible? ${reticle.visible}`); // 2. hitTestSource 와 reticle 상태
-
-            if (hitTestSource && reticle.visible) {
-                const frame = renderer.xr.getFrame();
-                if (!frame) {
-                    console.warn("onSelectStart: No XRFrame available.");
-                    showStatus("프레임 정보 없음. 다시 시도.", 2000);
-                    return;
-                }
-                console.log("onSelectStart: XRFrame acquired.");
-
-                const hitTestResults = frame.getHitTestResults(hitTestSource);
-                console.log(`onSelectStart: Hit test results count: ${hitTestResults.length}`); // 3. Hit-test 결과 수
-
-                if (hitTestResults.length > 0) {
-                    const hit = hitTestResults[0];
-                    const referenceSpace = renderer.xr.getReferenceSpace();
-                    if (!referenceSpace) {
-                        console.warn("onSelectStart: No reference space available.");
-                        showStatus("기준 공간 정보 없음. 다시 시도.", 2000);
-                        return;
-                    }
-                    console.log("onSelectStart: Reference space acquired.");
-
-                    const hitPose = hit.getPose(referenceSpace);
-                    
-                    if (hitPose) {
-                        console.log("onSelectStart: Hit pose acquired. Attempting to place dome."); // 4. Hit pose 획득 성공
-                        const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
-                        hitMatrix.userData = { hitTestResult: hit };
-                        updateAndPlaceDome(hitMatrix);
-                    } else {
-                         showStatus("위치 감지 실패. 다시 시도하세요.", 2000);
-                         console.warn("onSelectStart: Hit test returned a hit, but getPose failed.");
-                    }
-                } else {
-                    showStatus("표면 감지 실패. 다른 곳을 조준하세요.", 2000);
-                    console.log("onSelectStart: No hit test results at reticle position.");
-                }
-            } else if (domeGroup) { 
-                console.log("onSelectStart: Checking for marker interaction.");
+            // Handle marker interaction directly here
+            if (domeGroup) {
                 const controller = event.target; 
                 const tempMatrix = new THREE.Matrix4();
                 tempMatrix.identity().extractRotation(controller.matrixWorld); 
@@ -588,14 +494,16 @@
                     const firstIntersected = intersects[0].object;
                     if (firstIntersected.userData.isLightMarker) {
                         toggleMarkerLabel(firstIntersected);
+                        return; // Marker was tapped, don't try to place a dome
                     }
                 }
-            } else if (!hitTestSource) {
-                showStatus("표면 감지 기능을 초기화 중입니다. 잠시 후 다시 시도하세요.", 2500);
-                console.warn("onSelectStart: Attempted select but hitTestSource is not available.");
-            } else if (!reticle.visible) {
-                showStatus("레티클이 표면을 찾지 못했습니다. 다른 곳을 조준하세요.", 2500);
-                console.log("onSelectStart: Reticle not visible, no target for placement.");
+            }
+
+            // If not a marker tap, request placement
+            if (reticle.visible) {
+                placementRequested = true;
+            } else {
+                 showStatus("레티클이 표면을 찾지 못했습니다. 다른 곳을 조준하세요.", 2500);
             }
         }
         
@@ -635,21 +543,17 @@
             const backgroundColor = parameters.backgroundColor || { r:0, g:0, b:0, a:0.5 };
             const textColor = parameters.textColor || { r:255, g:255, b:255, a:1.0 };
             const padding = parameters.padding || 10;
-
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             context.font = `Bold ${fontsize}px ${fontface}`;
             const metrics = context.measureText(message);
             const textWidth = metrics.width;
-            
             canvas.width = textWidth + padding * 2 + borderThickness * 2;
             canvas.height = fontsize * 1.4 + padding * 2 + borderThickness * 2; 
             context.font = `Bold ${fontsize}px ${fontface}`; 
-            
             context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
             context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
             context.lineWidth = borderThickness;
-            
             const radius = 8; 
             context.beginPath();
             context.moveTo(radius + borderThickness, borderThickness);
@@ -664,12 +568,10 @@
             context.closePath();
             context.fill();
             if (borderThickness > 0) context.stroke();
-
             context.fillStyle = `rgba(${textColor.r},${textColor.g},${textColor.b},${textColor.a})`;
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             context.fillText(message, canvas.width / 2, canvas.height / 2);
-
             const texture = new THREE.CanvasTexture(canvas);
             texture.needsUpdate = true;
             const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
@@ -678,6 +580,7 @@
             return sprite;
         }
 
+        // --- Dome Dragging Logic (Pointer Events) ---
         function onPointerDown(event) {
             if (!renderer.xr.isPresenting || !domeGroup ) return;
             if (event.pointerType === 'mouse' && event.button !== 0) return;
@@ -694,153 +597,28 @@
                     activePointerId = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);
                     showStatus("돔 이동 중... 기기 중앙을 원하는 위치로 조준하며 드래그.", 0);
-                    if (!domeGroup.userData.anchor) reticle.visible = true;
                 }
             }
         }
-
-        function onPointerMove(event) {
-            if (!isDraggingDome || event.pointerId !== activePointerId || !renderer.xr.isPresenting) {
-                return;
-            }
-        }
-
+        function onPointerMove(event) { if (!isDraggingDome || event.pointerId !== activePointerId) return; }
         function onPointerUp(event) {
             if (event.pointerId !== activePointerId) return;
             if (isDraggingDome) {
                 isDraggingDome = false;
                 activePointerId = null;
                 renderer.domElement.releasePointerCapture(event.pointerId);
-                
-                if (domeGroup && reticle.visible && !domeGroup.userData.anchor) {
-                    const frame = renderer.xr.getFrame();
-                    if (frame && hitTestSource) {
-                        const hitTestResults = frame.getHitTestResults(hitTestSource);
-                        if (hitTestResults.length > 0) {
-                            const hit = hitTestResults[0];
-                            const referenceSpace = renderer.xr.getReferenceSpace();
-                            const hitPose = hit.getPose(referenceSpace);
-                            if (hitPose) {
-                                domeGroup.position.copy(hitPose.transform.position);
-                                domeGroup.quaternion.copy(hitPose.transform.orientation);
-                                showStatus("돔 이동 완료.", 2000);
-                            }
-                        }
-                    }
-                } else {
-                    showStatus("돔 이동 완료.", 2000);
-                }
-                
-                if (domeGroup && domeGroup.userData.anchor) { 
-                    reticle.visible = false;
-                } else if (!domeGroup) {
-                    if (hitTestSource) reticle.visible = true;
-                }
+                showStatus("돔 이동 완료.", 2000);
             }
         }
         
-        function openSettingsModal() {
-            document.getElementById('modalTargetSize').value = targetSize;
-            document.getElementById('modalRadiusMultiplier').value = radiusMultiplier;
-            document.getElementById('modalAzimuths').value = azimuths.join(',');
-            document.getElementById('modalElevations').value = elevations.join(',');
-            settingsModal.style.display = 'block';
-        }
+        // --- Modal & Torch Logic (no changes needed here) ---
+        function openSettingsModal(){document.getElementById('modalTargetSize').value=targetSize;document.getElementById('modalRadiusMultiplier').value=radiusMultiplier;document.getElementById('modalAzimuths').value=azimuths.join(',');document.getElementById('modalElevations').value=elevations.join(',');settingsModal.style.display='block';}
+        function closeSettingsModal(){settingsModal.style.display='none';}
+        function applySettingsFromModal(){targetSize=parseFloat(document.getElementById('modalTargetSize').value)||100;radiusMultiplier=parseFloat(document.getElementById('modalRadiusMultiplier').value)||3;azimuths=document.getElementById('modalAzimuths').value.split(',').map(Number).filter(n=>!isNaN(n));elevations=document.getElementById('modalElevations').value.split(',').map(Number).filter(n=>!isNaN(n));document.getElementById('targetSize').value=targetSize;document.getElementById('radiusMultiplier').value=radiusMultiplier;document.getElementById('azimuths').value=azimuths.join(',');document.getElementById('elevations').value=elevations.join(',');closeSettingsModal();showStatus("설정 적용됨.",2500);if(renderer.xr.isPresenting&&domeGroup){updateAndPlaceDome();}}
+        async function controlTorch(enable){if(!currentStream&&enable){try{currentStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});}catch(err){console.error("카메라 스트림 확보 실패:",err);showStatus("손전등 제어 불가",2500);return false;}}else if(!currentStream&&!enable){isTorchOn=false;torchButton.textContent="손전등 켜기";return true;}const videoTrack=currentStream?currentStream.getVideoTracks()[0]:null;if(!videoTrack){showStatus("비디오 트랙 없음",2500);if(!enable&&currentStream){currentStream.getTracks().forEach(track=>{if(track.readyState==='live')track.stop();});currentStream=null;}return false;}const capabilities=videoTrack.getCapabilities?videoTrack.getCapabilities():{};if(!capabilities.torch){showStatus("손전등 기능 미지원",3000);if(!enable&&currentStream){currentStream.getTracks().forEach(track=>{if(track.readyState==='live')track.stop();});currentStream=null;}return false;}try{await videoTrack.applyConstraints({advanced:[{torch:enable}]});isTorchOn=enable;torchButton.textContent=enable?"손전등 끄기":"손전등 켜기";showStatus(enable?"손전등 켜짐":"손전등 꺼짐",1500);if(!enable&&currentStream){currentStream.getTracks().forEach(track=>{if(track.readyState==='live')track.stop();});currentStream=null;}return true;}catch(err){console.error("손전등 제어 실패:",err);showStatus("손전등 제어 오류",2500);if(!enable&&currentStream){currentStream.getTracks().forEach(track=>{if(track.readyState==='live')track.stop();});currentStream=null;}return false;}}
+        async function toggleTorch(){await controlTorch(!isTorchOn);}
 
-        function closeSettingsModal() {
-            settingsModal.style.display = 'none';
-        }
-
-        function applySettingsFromModal() {
-            targetSize = parseFloat(document.getElementById('modalTargetSize').value) || 100;
-            radiusMultiplier = parseFloat(document.getElementById('modalRadiusMultiplier').value) || 3;
-            azimuths = document.getElementById('modalAzimuths').value.split(',').map(Number).filter(n => !isNaN(n));
-            elevations = document.getElementById('modalElevations').value.split(',').map(Number).filter(n => !isNaN(n));
-            
-            document.getElementById('targetSize').value = targetSize;
-            document.getElementById('radiusMultiplier').value = radiusMultiplier;
-            document.getElementById('azimuths').value = azimuths.join(',');
-            document.getElementById('elevations').value = elevations.join(',');
-
-            closeSettingsModal();
-            showStatus("설정 적용됨. 돔이 배치되어 있다면 업데이트됩니다.", 2500);
-            if (renderer.xr.isPresenting && domeGroup) {
-                updateAndPlaceDome();
-            }
-        }
-
-        async function controlTorch(enable) {
-            if (!currentStream && enable) {
-                 try {
-                    console.log("Attempting to acquire camera stream for torch...");
-                    currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-                    console.log("Camera stream for torch acquired.");
-                 } catch(err) {
-                    console.error("손전등 제어를 위한 카메라 스트림 확보 실패:", err);
-                    showStatus("손전등 제어 불가: 카메라 접근 실패", 2500);
-                    return false;
-                 }
-            } else if (!currentStream && !enable) {
-                console.log("Torch control: No stream to turn off torch.");
-                isTorchOn = false;
-                torchButton.textContent = "손전등 켜기";
-                return true; 
-            }
-
-            const videoTrack = currentStream ? currentStream.getVideoTracks()[0] : null;
-            if (!videoTrack) {
-                showStatus("손전등 제어 불가: 비디오 트랙 없음", 2500);
-                console.warn("Torch control: No video track found in stream.");
-                 if (!enable && currentStream) {
-                    currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                    currentStream = null;
-                }
-                return false;
-            }
-
-            const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-            if (!capabilities.torch) {
-                showStatus("이 기기/브라우저에서는 손전등 기능을 지원하지 않습니다.", 3000);
-                console.warn("Torch control: Torch capability not supported by video track.");
-                if (!enable && currentStream) {
-                    currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                    currentStream = null;
-                }
-                return false;
-            }
-
-            try {
-                await videoTrack.applyConstraints({
-                    advanced: [{ torch: enable }]
-                });
-                isTorchOn = enable;
-                torchButton.textContent = enable ? "손전등 끄기" : "손전등 켜기";
-                showStatus(enable ? "손전등 켜짐" : "손전등 꺼짐", 1500);
-                console.log(`Torch ${enable ? 'enabled' : 'disabled'}.`);
-
-                if (!enable && currentStream) { 
-                    console.log("Releasing camera stream after turning off torch.");
-                    currentStream.getTracks().forEach(track => {
-                        if (track.readyState === 'live') track.stop();
-                    });
-                    currentStream = null;
-                }
-                return true;
-            } catch (err) {
-                console.error("손전등 제어 실패:", err);
-                showStatus("손전등 제어 중 오류 발생", 2500);
-                if (!enable && currentStream) {
-                    currentStream.getTracks().forEach(track => { if (track.readyState === 'live') track.stop(); });
-                    currentStream = null;
-                }
-                return false;
-            }
-        }
-        
-        async function toggleTorch() {
-            await controlTorch(!isTorchOn);
-        }
-
+        // --- Window Resize & Animation Loop ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -851,6 +629,7 @@
             renderer.setAnimationLoop(render);
         }
 
+        // *** MODIFIED ***: Render loop now handles placement
         function render(timestamp, frame) {
             const session = renderer.xr.getSession();
             if (!session) {
@@ -858,52 +637,56 @@
                 return;
             }
             
-            if (frame && hitTestSource) {
+            // This entire block only runs if we are in an AR session and have a frame
+            if (frame) { 
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 if (!referenceSpace) return;
-
-                const hitTestResults = frame.getHitTestResults(hitTestSource);
-                if (hitTestResults.length > 0) {
-                    const hit = hitTestResults[0];
-                    const hitPose = hit.getPose(referenceSpace);
-                    if (hitPose) {
-                        // Reticle should be visible if no anchored dome, or if dragging an anchored dome to a new spot.
-                        // Or if simply no dome exists yet.
-                        if (!domeGroup || (domeGroup && !domeGroup.userData.anchor) || (domeGroup && domeGroup.userData.anchor && isDraggingDome)) {
-                           reticle.visible = true;
-                           reticle.matrix.fromArray(hitPose.transform.matrix);
-                        } else { // Anchored dome exists and not dragging it
-                           reticle.visible = false;
-                        }
-                        
-                        if (isDraggingDome && domeGroup) {
-                            domeGroup.position.copy(hitPose.transform.position);
-                            // domeGroup.quaternion.copy(hitPose.transform.orientation); // Optional
+                
+                // Handle placement request from onSelectStart
+                if (placementRequested) {
+                    placementRequested = false; // Reset flag immediately
+                    if (hitTestSource) {
+                        const hitTestResults = frame.getHitTestResults(hitTestSource);
+                        if (hitTestResults.length > 0) {
+                            const hit = hitTestResults[0];
+                            const hitPose = hit.getPose(referenceSpace);
+                            if (hitPose) {
+                                const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+                                hitMatrix.userData = { hitTestResult: hit };
+                                updateAndPlaceDome(hitMatrix, frame); // Pass frame for anchor creation
+                            }
                         }
                     }
-                } else { // No hit test results this frame
-                    // Keep reticle visible if it was supposed to be (e.g., no dome or dragging)
-                    if (!domeGroup || (domeGroup && !domeGroup.userData.anchor) || (domeGroup && domeGroup.userData.anchor && isDraggingDome)) {
-                        // Reticle might not have a valid position if no hits, but keep it 'logically' visible
-                        // It might just not render if its matrix isn't updated to a valid pose.
-                        // Or, explicitly hide if no surface is found for an extended period (more complex logic)
+                }
+
+                // Update reticle position and visibility
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length > 0) {
+                        const hitPose = hitTestResults[0].getPose(referenceSpace);
+                        if (hitPose) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(hitPose.transform.matrix);
+                        }
                     } else {
                         reticle.visible = false;
                     }
+                } else {
+                    reticle.visible = false;
                 }
-            } else if (frame && !hitTestSource) { 
-                 reticle.visible = false; // No hit-test source, definitely hide reticle
-            }
-            
-            // Update anchored dome's position if it exists and not being actively dragged
-            if (domeGroup && domeGroup.userData.anchor && !isDraggingDome) {
-                const anchor = domeGroup.userData.anchor;
-                if (frame && anchor.anchorSpace) { // XRAnchor has anchorSpace
-                    const pose = frame.getPose(anchor.anchorSpace, renderer.xr.getReferenceSpace());
+                
+                // Update anchored dome's position
+                if (domeGroup && domeGroup.userData.anchor && !isDraggingDome) {
+                    const pose = frame.getPose(domeGroup.userData.anchor.anchorSpace, referenceSpace);
                     if (pose) {
                         domeGroup.position.copy(pose.transform.position);
                         domeGroup.quaternion.copy(pose.transform.orientation);
                     }
+                }
+
+                // Update dragged dome's position
+                if (isDraggingDome && domeGroup && reticle.visible) {
+                    domeGroup.position.setFromMatrixPosition(reticle.matrix);
                 }
             }
             renderer.render(scene, camera);

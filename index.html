@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR AR Dome Interactive - Crosshair Fix</title>
+  <title>WebXR AR Dome Interactive (카메라+AR)</title>
   <style>
     body { margin:0; overflow:hidden; font-family:sans-serif; background:#111; color:#eee; }
     #ui {
@@ -35,9 +35,14 @@
       width:5px; height:5px; border-radius:50%; background:#fff;
       box-shadow:0 0 7px #00f2,0 0 0 2px #111a;
     }
+    #videoBg {
+      position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:0;object-fit:cover; background:#000;
+      pointer-events:none;display:block;
+    }
   </style>
 </head>
 <body>
+  <video id="videoBg" autoplay muted playsinline></video>
   <div id="ui">
     <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
     <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
@@ -54,13 +59,29 @@
     import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
 
     let camera, scene, renderer, domeGroup, transformControls;
-    let videoTrack = null, torchOn = false;
+    let videoTrack = null, torchOn = false, videoStream = null;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let ground;
 
-    init();
+    // ---- 카메라(비디오) 백그라운드 활성화 ----
+    startCameraBg();
+    async function startCameraBg() {
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        document.getElementById('videoBg').srcObject = videoStream;
+        // 플래시 트랙도 여기서 가져오기
+        const track = videoStream.getVideoTracks()[0], caps = track.getCapabilities();
+        if (caps.torch) {
+          videoTrack = track;
+          document.getElementById('flashBtn').disabled = false;
+        }
+      } catch (e) {
+        alert('카메라 접근 실패: '+e.message);
+      }
+    }
 
+    init();
     function init() {
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
@@ -94,7 +115,7 @@
         if (hits.length>0) generateDome(radius, azs, els, hits[0].point);
       };
       document.getElementById('flashBtn').onclick = toggleFlash;
-      tryFlashAccess();
+
       window.addEventListener('click', onSceneClick);
       window.addEventListener('resize', onResize);
 
@@ -179,13 +200,6 @@
       sp.scale.set(c.width/200,c.height/200,1); return sp;
     }
 
-    async function tryFlashAccess(){
-      try{
-        const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-        const tr=st.getVideoTracks()[0], caps=tr.getCapabilities();
-        if (caps.torch){ videoTrack=tr; document.getElementById('flashBtn').disabled=false; }
-      }catch{}
-    }
     function toggleFlash(){ if (!videoTrack)return; torchOn=!torchOn;
       videoTrack.applyConstraints({advanced:[{torch:torchOn}]})
         .then(()=>document.getElementById('flashBtn').textContent=torchOn?'🔦ON':'🔦');

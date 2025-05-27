@@ -1,790 +1,170 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTI AR 돔 가이드</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background: #000;
-            color: #fff;
-            font-family: Arial, sans-serif;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        #videoContainer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 1;
-        }
-        
-        #video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        #canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: auto;
-        }
-        
-        #controls {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 100;
-            background: rgba(0, 0, 0, 0.9);
-            padding: 15px;
-            border-radius: 10px;
-            max-width: 320px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .control-group {
-            margin-bottom: 15px;
-        }
-        
-        .control-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-size: 12px;
-            color: #ccc;
-        }
-        
-        .control-group input, .control-group select, .control-group textarea {
-            width: 100%;
-            padding: 5px;
-            border: 1px solid #555;
-            background: #333;
-            color: #fff;
-            border-radius: 3px;
-            box-sizing: border-box;
-        }
-        
-        .control-group textarea {
-            resize: vertical;
-            height: 60px;
-            font-family: monospace;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        button {
-            flex: 1;
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            background: #007bff;
-            color: white;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        button:hover {
-            background: #0056b3;
-        }
-        
-        button:disabled {
-            background: #666;
-            cursor: not-allowed;
-        }
-        
-        #flash-btn {
-            background: #ffc107;
-            color: #000;
-        }
-        
-        #flash-btn:hover {
-            background: #e0a800;
-        }
-        
-        #flash-btn.active {
-            background: #dc3545;
-            color: #fff;
-        }
-        
-        #start-camera-btn {
-            background: #28a745;
-        }
-        
-        #start-camera-btn:hover {
-            background: #1e7e34;
-        }
-        
-        #info {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.9);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 100;
-            backdrop-filter: blur(10px);
-        }
-        
-        .geodesic-info {
-            font-size: 10px;
-            color: #aaa;
-            margin-top: 5px;
-        }
-        
-        .status {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 100;
-        }
-        
-        .status.error {
-            background: rgba(220, 53, 69, 0.9);
-        }
-        
-        .status.success {
-            background: rgba(40, 167, 69, 0.9);
-        }
-        
-        .hidden {
-            display: none;
-        }
-        
-        #elevation-help {
-            font-size: 10px;
-            color: #aaa;
-            margin-top: 2px;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebXR AR Dome Interactive v2</title>
+  <style>
+    body { margin:0; overflow:hidden; font-family:sans-serif; background:#111; color:#eee; }
+    #ui {
+      position:absolute; top:10px; left:10px;
+      background:rgba(0,0,0,0.7); padding:12px; border-radius:8px;
+      z-index:10; max-width:260px;
+    }
+    #ui label { display:block; font-size:13px; margin-top:8px; }
+    #ui input, #ui select { width:100%; padding:4px; margin-top:4px; border-radius:4px; border:none; }
+    button { margin-top:10px; width:100%; padding:8px; border:none; border-radius:4px; background:#28a745; color:#fff; font-weight:bold; cursor:pointer; }
+    #flashBtn {
+      position:absolute; top:10px; right:10px;
+      background:#ffc107; color:#000; padding:8px; border:none; border-radius:6px;
+      font-size:14px; cursor:pointer; z-index:10;
+    }
+    #crosshair {
+      position:absolute; top:50%; left:50%; width:30px; height:30px;
+      margin:-15px 0 0 -15px; border:2px solid #fff; border-radius:50%; pointer-events:none; z-index:9;
+    }
+  </style>
 </head>
 <body>
-    <div id="videoContainer">
-        <video id="video" autoplay playsinline muted></video>
-    </div>
-    
-    <canvas id="canvas"></canvas>
-    
-    <div id="status" class="status hidden"></div>
-    
-    <div id="controls">
-        <div class="control-group">
-            <label>대상 크기 (cm)</label>
-            <input type="number" id="targetSize" value="10" min="1" max="100">
-        </div>
-        
-        <div class="control-group">
-            <label>돔 배율</label>
-            <select id="domeMultiplier">
-                <option value="2">2배</option>
-                <option value="3" selected>3배</option>
-                <option value="4">4배</option>
-            </select>
-            <div id="dome-size-display" class="geodesic-info">돔 크기: 30cm</div>
-        </div>
-        
-        <div class="control-group">
-            <label>방위각 분할</label>
-            <select id="azimuthDivision">
-                <option value="8">8방향</option>
-                <option value="10" selected>10방향</option>
-                <option value="12">12방향</option>
-            </select>
-        </div>
-        
-        <div class="control-group">
-            <label>고도각 (도, 콤마로 구분)</label>
-            <textarea id="elevationAngles" placeholder="예: 15, 30, 45, 60">30, 45, 60</textarea>
-            <div id="elevation-help">각도를 콤마로 구분하여 입력 (0-85도)</div>
-        </div>
-        
-        <div class="control-group">
-            <label>
-                <input type="checkbox" id="geodesicMode"> Geodesic 패턴 사용
-            </label>
-            <div class="geodesic-info">
-                더 균등한 조명 분포를 위한 정이십면체 기반 패턴
-            </div>
-        </div>
-        
-        <div class="button-group">
-            <button id="start-camera-btn" onclick="startCamera()">카메라 시작</button>
-            <button onclick="generateDome()">돔 생성</button>
-        </div>
-        
-        <div class="button-group">
-            <button id="flash-btn" onclick="toggleFlash()" disabled>플래시 OFF</button>
-            <button onclick="clearDome()">초기화</button>
-        </div>
-        
-        <div class="button-group">
-            <button onclick="toggleControls()">컨트롤 숨기기</button>
-        </div>
-    </div>
-    
-    <div id="info">
-        카메라: <span id="cameraStatus">대기중</span><br>
-        플래시: <span id="flashStatus">OFF</span><br>
-        터치: 마커 정보 표시/숨기기<br>
-        마커 개수: <span id="markerCount">0</span>
-    </div>
+  <div id="ui">
+    <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
+    <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
+    <label>방위각 (°, 콤마):<br><input type="text" id="azimuths" value="0,90,180,270"></label>
+    <label>고도각 (°, 콤마):<br><input type="text" id="elevations" value="30,45,60"></label>
+    <button id="generate">돔 생성</button>
+  </div>
+  <button id="flashBtn" disabled>Flash OFF</button>
+  <div id="crosshair"></div>
 
-    <script>
-        let scene, camera, renderer, dome, markers = [];
-        let video, canvas, ctx;
-        let cameraStream = null, flashTrack = null;
-        let targetSize = 10, domeRadius = 0.15; // 미터 단위
-        let flashOn = false;
-        let controlsVisible = true;
-        let reticle = null; // 타겟팅 레티클
-        
-        function init() {
-            // 비디오 요소
-            video = document.getElementById('video');
-            canvas = document.getElementById('canvas');
-            ctx = canvas.getContext('2d');
-            
-            // 캔버스 크기 설정
-            resizeCanvas();
-            
-            // Three.js 설정
-            scene = new THREE.Scene();
-            
-            // 카메라 설정 (AR용, 일반 시야각)
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
-            camera.position.set(0, 0, 0);
-            
-            // 렌더러 설정
-            renderer = new THREE.WebGLRenderer({ 
-                canvas: canvas,
-                alpha: true,
-                antialias: true 
-            });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x000000, 0); // 투명 배경
-            
-            // 타겟팅 레티클 생성
-            createReticle();
-            
-            // 이벤트 리스너
-            canvas.addEventListener('click', onCanvasClick);
-            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-            window.addEventListener('resize', onWindowResize);
-            
-            // 컨트롤 업데이트
-            document.getElementById('targetSize').addEventListener('input', updateDomeSize);
-            document.getElementById('domeMultiplier').addEventListener('change', updateDomeSize);
-            
-            updateDomeSize();
-            animate();
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
+    import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
+
+    let camera, scene, renderer, domeGroup, transformControls;
+    let videoTrack = null, torchOn = false;
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+
+    init();
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+
+      renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+      document.body.appendChild(ARButton.createButton(renderer));
+
+      // ground plane for reticle intersection
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(10,10),
+        new THREE.MeshBasicMaterial({ visible:false })
+      );
+      ground.rotation.x = -Math.PI/2; ground.position.y = 0;
+      scene.add(ground);
+
+      // light
+      const light = new THREE.DirectionalLight(0xffffff,1);
+      light.position.set(5,10,7.5);
+      scene.add(light);
+
+      document.getElementById('generate').onclick = () => {
+        const radius = getRadius();
+        const azs = getArray('azimuths');
+        const els = getArray('elevations');
+        // reticle intersection point
+        const cross = document.getElementById('crosshair');
+        // cast ray at center
+        raycaster.setFromCamera({x:0,y:0}, camera);
+        const hits = raycaster.intersectObject(ground);
+        if (hits.length>0) generateDome(radius, azs, els, hits[0].point);
+      };
+      document.getElementById('flashBtn').onclick = toggleFlash;
+
+      tryFlashAccess();
+      window.addEventListener('click', onSceneClick);
+      window.addEventListener('resize', onResize);
+
+      renderer.setAnimationLoop(() => renderer.render(scene,camera));
+    }
+
+    function getRadius(){
+      const size = parseFloat(document.getElementById('targetSize').value);
+      const mul = parseFloat(document.getElementById('sizeMultiplier').value);
+      return (size*mul)/1000;
+    }
+
+    function getArray(id){return document.getElementById(id).value.split(',').map(n=>parseFloat(n.trim())).filter(n=>!isNaN(n));}
+
+    function generateDome(radius, azimuths, elevations, pos){
+      if (domeGroup) scene.remove(domeGroup);
+      domeGroup = new THREE.Group();
+
+      const domeMat = new THREE.MeshStandardMaterial({color:0x000000,transparent:true,opacity:0.3,side:THREE.DoubleSide});
+      const domeMesh = new THREE.Mesh(new THREE.SphereGeometry(radius,32,16,0,Math.PI*2,0,Math.PI/2),domeMat);
+      domeGroup.add(domeMesh);
+
+      const geo = new THREE.SphereGeometry(0.03,12,12);
+      const mat = new THREE.MeshBasicMaterial({color:0xffff00});
+      azimuths.forEach(az=>elevations.forEach(el=>{
+        const t = THREE.MathUtils.degToRad(az), p = THREE.MathUtils.degToRad(el);
+        const x = radius*Math.cos(p)*Math.sin(t), y = radius*Math.sin(p), z = radius*Math.cos(p)*Math.cos(t);
+        const m = new THREE.Mesh(geo,mat);
+        m.position.set(x,y,z);
+        m.userData.label = `${az}°, ${el}°`;
+        domeGroup.add(m);
+      }));
+
+      domeGroup.position.copy(pos);
+      scene.add(domeGroup);
+
+      if (transformControls) scene.remove(transformControls);
+      transformControls = new TransformControls(camera, renderer.domElement);
+      transformControls.attach(domeGroup);
+      transformControls.setMode('translate');
+      scene.add(transformControls);
+    }
+
+    function onSceneClick(evt){
+      pointer.x=(evt.clientX/window.innerWidth)*2-1;
+      pointer.y=-(evt.clientY/window.innerHeight)*2+1;
+      raycaster.setFromCamera(pointer,camera);
+      const hits=raycaster.intersectObjects(scene.children,true);
+      if (hits.length>0){
+        const o=hits[0].object;
+        if (o.userData.label){
+          if (!o.userData.sprite){
+            const sp=makeTextSprite(o.userData.label);
+            sp.position.copy(o.position).add(new THREE.Vector3(0,0.05,0)); scene.add(sp); o.userData.sprite=sp;
+          } else { scene.remove(o.userData.sprite); delete o.userData.sprite; }
         }
-        
-        function createReticle() {
-            // 레티클 거리 (사용자가 설정한 돔 크기에 맞춰 조정)
-            const reticleDistance = 0.5; // 미터
-            
-            // 십자형 레티클 생성
-            const reticleGroup = new THREE.Group();
-            
-            // 원형 레티클
-            const circleGeometry = new THREE.RingGeometry(0.015, 0.02, 32);
-            const circleMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xff0000, 
-                transparent: true, 
-                opacity: 0.8,
-                side: THREE.DoubleSide
-            });
-            const circle = new THREE.Mesh(circleGeometry, circleMaterial);
-            reticleGroup.add(circle);
-            
-            // 중심점
-            const centerGeometry = new THREE.CircleGeometry(0.003, 8);
-            const centerMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xff0000,
-                transparent: true,
-                opacity: 1.0
-            });
-            const center = new THREE.Mesh(centerGeometry, centerMaterial);
-            reticleGroup.add(center);
-            
-            // 십자 선
-            const lineGeometry = new THREE.BufferGeometry();
-            const lineVertices = new Float32Array([
-                -0.025, 0, 0,  0.025, 0, 0,  // 수평선
-                0, -0.025, 0,  0, 0.025, 0   // 수직선
-            ]);
-            lineGeometry.setAttribute('position', new THREE.BufferAttribute(lineVertices, 3));
-            
-            const lineMaterial = new THREE.LineBasicMaterial({ 
-                color: 0xff0000,
-                transparent: true,
-                opacity: 0.8
-            });
-            const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-            reticleGroup.add(lines);
-            
-            // 레티클을 화면 중앙에 위치
-            reticleGroup.position.set(0, 0, -reticleDistance);
-            
-            reticle = reticleGroup;
-            scene.add(reticle);
-        }
-        
-        async function startCamera() {
-            try {
-                showStatus('카메라 권한을 요청하고 있습니다...', 'info');
-                
-                // 일반 카메라 설정 (광각 비활성화)
-                const constraints = {
-                    video: {
-                        facingMode: 'environment', // 후면 카메라
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        // 광각 비활성화 옵션들
-                        advanced: [{
-                            focusMode: 'continuous',
-                        }]
-                    }
-                };
-                
-                cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = cameraStream;
-                
-                // 플래시 트랙 찾기
-                const videoTracks = cameraStream.getVideoTracks();
-                if (videoTracks.length > 0) {
-                    flashTrack = videoTracks[0];
-                    
-                    // 플래시 기능 확인
-                    const capabilities = flashTrack.getCapabilities();
-                    if (capabilities.torch) {
-                        document.getElementById('flash-btn').disabled = false;
-                        showStatus('카메라가 시작되었습니다. 플래시 사용 가능!', 'success');
-                    } else {
-                        showStatus('카메라가 시작되었습니다. (플래시 지원 안됨)', 'info');
-                    }
-                } else {
-                    showStatus('카메라가 시작되었습니다.', 'success');
-                }
-                
-                document.getElementById('cameraStatus').textContent = '활성';
-                document.getElementById('start-camera-btn').textContent = '카메라 재시작';
-                
-                // 비디오가 로드되면 캔버스 크기 조정
-                video.addEventListener('loadedmetadata', resizeCanvas);
-                
-            } catch (error) {
-                console.error('카메라 접근 오류:', error);
-                showStatus('카메라 접근 실패: ' + error.message, 'error');
-                document.getElementById('cameraStatus').textContent = '오류';
-            }
-        }
-        
-        async function toggleFlash() {
-            if (!flashTrack) {
-                showStatus('카메라가 시작되지 않았습니다.', 'error');
-                return;
-            }
-            
-            try {
-                flashOn = !flashOn;
-                
-                // 플래시 제어
-                await flashTrack.applyConstraints({
-                    advanced: [{ torch: flashOn }]
-                });
-                
-                const flashBtn = document.getElementById('flash-btn');
-                const flashStatus = document.getElementById('flashStatus');
-                
-                if (flashOn) {
-                    flashBtn.textContent = '플래시 ON';
-                    flashBtn.classList.add('active');
-                    flashStatus.textContent = 'ON';
-                    showStatus('플래시가 켜졌습니다.', 'success');
-                } else {
-                    flashBtn.textContent = '플래시 OFF';
-                    flashBtn.classList.remove('active');
-                    flashStatus.textContent = 'OFF';
-                    showStatus('플래시가 꺼졌습니다.', 'info');
-                }
-                
-            } catch (error) {
-                console.error('플래시 제어 오류:', error);
-                showStatus('플래시 제어 실패: ' + error.message, 'error');
-            }
-        }
-        
-        function generateDome() {
-            clearDome();
-            
-            targetSize = parseFloat(document.getElementById('targetSize').value);
-            const multiplier = parseFloat(document.getElementById('domeMultiplier').value);
-            const azimuthCount = parseInt(document.getElementById('azimuthDivision').value);
-            const elevationText = document.getElementById('elevationAngles').value;
-            const useGeodesic = document.getElementById('geodesicMode').checked;
-            
-            // 고도각 파싱
-            const elevationAngles = elevationText
-                .split(',')
-                .map(angle => parseFloat(angle.trim()))
-                .filter(angle => !isNaN(angle) && angle >= 0 && angle <= 85);
-            
-            if (elevationAngles.length === 0) {
-                showStatus('유효한 고도각을 입력해주세요 (0-85도)', 'error');
-                return;
-            }
-            
-            domeRadius = (targetSize * multiplier) / 200; // 미터 단위로 변환 (반지름)
-            
-            // 돔을 레티클 위치에 생성
-            const domePosition = reticle.position.clone();
-            
-            // 돔 구조 생성 (반투명 검은색 반구)
-            const domeGeometry = new THREE.SphereGeometry(domeRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            const domeMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0x000000,
-                transparent: true,
-                opacity: 0.4,
-                side: THREE.DoubleSide
-            });
-            
-            dome = new THREE.Mesh(domeGeometry, domeMaterial);
-            dome.position.copy(domePosition);
-            scene.add(dome);
-            
-            // 와이어프레임 추가 (가이드용)
-            const wireframeGeometry = domeGeometry.clone();
-            const wireframeMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0x333333,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.6
-            });
-            const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-            wireframe.position.copy(domePosition);
-            scene.add(wireframe);
-            
-            // 중심 마커 (빨간색)
-            const centerGeometry = new THREE.SphereGeometry(0.005, 8, 8);
-            const centerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const centerMarker = new THREE.Mesh(centerGeometry, centerMaterial);
-            centerMarker.position.copy(domePosition);
-            scene.add(centerMarker);
-            
-            generateLightPositions(azimuthCount, elevationAngles, useGeodesic, domePosition);
-            showStatus(`돔이 생성되었습니다. (${elevationAngles.length}개 고도각)`, 'success');
-        }
-        
-        function generateLightPositions(azimuthCount, elevationAngles, useGeodesic, domeCenter) {
-            const positions = [];
-            
-            if (useGeodesic) {
-                positions.push(...generateGeodesicPositions());
-            } else {
-                elevationAngles.forEach(elevationDeg => {
-                    const elevation = elevationDeg * Math.PI / 180;
-                    const ringRadius = domeRadius * Math.cos(elevation);
-                    const height = domeRadius * Math.sin(elevation);
-                    
-                    for (let a = 0; a < azimuthCount; a++) {
-                        const azimuth = (a * 2 * Math.PI) / azimuthCount;
-                        const x = ringRadius * Math.cos(azimuth);
-                        const z = ringRadius * Math.sin(azimuth);
-                        
-                        positions.push({
-                            x: x,
-                            y: height,
-                            z: z,
-                            azimuth: azimuth * 180 / Math.PI,
-                            elevation: elevationDeg
-                        });
-                    }
-                });
-            }
-            
-            // 조명 위치 마커들 생성 (노란색 구)
-            positions.forEach(pos => {
-                const pointGeometry = new THREE.SphereGeometry(0.008, 8, 8);
-                const pointMaterial = new THREE.MeshBasicMaterial({ 
-                    color: 0xffff00,
-                    transparent: false
-                });
-                const point = new THREE.Mesh(pointGeometry, pointMaterial);
-                point.position.set(
-                    domeCenter.x + pos.x, 
-                    domeCenter.y + pos.y, 
-                    domeCenter.z + pos.z
-                );
-                point.userData = {
-                    azimuth: pos.azimuth < 0 ? pos.azimuth + 360 : pos.azimuth,
-                    elevation: pos.elevation,
-                    isLightPosition: true,
-                    showInfo: false
-                };
-                markers.push(point);
-                scene.add(point);
-            });
-            
-            updateMarkerCount();
-        }
-        
-        function generateGeodesicPositions() {
-            const phi = (1 + Math.sqrt(5)) / 2;
-            const positions = [];
-            
-            const vertices = [
-                [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
-                [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
-                [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1]
-            ];
-            
-            vertices.forEach(vertex => {
-                const [x, y, z] = vertex;
-                const length = Math.sqrt(x*x + y*y + z*z);
-                const normalizedX = (x / length) * domeRadius;
-                const normalizedY = Math.abs(y / length) * domeRadius;
-                const normalizedZ = (z / length) * domeRadius;
-                
-                if (normalizedY > 0.01) {
-                    const azimuth = Math.atan2(normalizedZ, normalizedX) * 180 / Math.PI;
-                    const elevation = Math.asin(normalizedY / domeRadius) * 180 / Math.PI;
-                    
-                    positions.push({
-                        x: normalizedX,
-                        y: normalizedY,
-                        z: normalizedZ,
-                        azimuth: azimuth < 0 ? azimuth + 360 : azimuth,
-                        elevation: elevation
-                    });
-                }
-            });
-            
-            return positions;
-        }
-        
-        function onCanvasClick(event) {
-            const rect = canvas.getBoundingClientRect();
-            const mouse = new THREE.Vector2();
-            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            
-            const raycaster = new THREE.Raycaster();
-            raycaster.setFromCamera(mouse, camera);
-            
-            // 마커 클릭 확인
-            const markerIntersects = raycaster.intersectObjects(markers);
-            if (markerIntersects.length > 0) {
-                const marker = markerIntersects[0].object;
-                toggleMarkerInfo(marker);
-                return;
-            }
-        }
-        
-        function onTouchStart(event) {
-            event.preventDefault();
-            if (event.touches.length === 1) {
-                const touch = event.touches[0];
-                const rect = canvas.getBoundingClientRect();
-                const clickEvent = {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY
-                };
-                onCanvasClick(clickEvent);
-            }
-        }
-        
-        function onTouchEnd(event) {
-            event.preventDefault();
-        }
-        
-        function toggleMarkerInfo(marker) {
-            if (marker.userData.showInfo) {
-                // 정보 숨기기
-                if (marker.userData.infoSprite) {
-                    scene.remove(marker.userData.infoSprite);
-                    marker.userData.infoSprite = null;
-                }
-                marker.userData.showInfo = false;
-            } else {
-                // 다른 모든 마커의 정보 숨기기
-                markers.forEach(m => {
-                    if (m.userData.infoSprite) {
-                        scene.remove(m.userData.infoSprite);
-                        m.userData.infoSprite = null;
-                        m.userData.showInfo = false;
-                    }
-                });
-                
-                // 선택된 마커의 정보 표시
-                showMarkerInfo(marker);
-            }
-        }
-        
-        function showMarkerInfo(marker) {
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = 220;
-            canvas.height = 80;
-            
-            // 배경
-            context.fillStyle = 'rgba(0, 0, 0, 0.9)';
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // 테두리
-            context.strokeStyle = 'rgba(255, 255, 0, 0.8)';
-            context.lineWidth = 2;
-            context.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
-            
-            // 텍스트
-            context.fillStyle = 'white';
-            context.font = '16px Arial';
-            context.fillText(`방위각: ${marker.userData.azimuth.toFixed(1)}°`, 10, 25);
-            context.fillText(`고도각: ${marker.userData.elevation.toFixed(1)}°`, 10, 50);
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            const spriteMaterial = new THREE.SpriteMaterial({ 
-                map: texture,
-                transparent: true
-            });
-            const sprite = new THREE.Sprite(spriteMaterial);
-            
-            sprite.position.copy(marker.position);
-            sprite.position.y += 0.03;
-            sprite.scale.set(0.08, 0.04, 1);
-            
-            scene.add(sprite);
-            marker.userData.infoSprite = sprite;
-            marker.userData.showInfo = true;
-        }
-        
-        function clearDome() {
-            if (dome) {
-                scene.remove(dome);
-                dome = null;
-            }
-            
-            markers.forEach(marker => {
-                scene.remove(marker);
-                if (marker.userData.infoSprite) {
-                    scene.remove(marker.userData.infoSprite);
-                }
-            });
-            markers = [];
-            
-            // 모든 관련 객체 제거
-            const objectsToRemove = [];
-            scene.traverse(child => {
-                if (child !== reticle && 
-                    (child.userData?.isLightPosition || 
-                     child.material?.wireframe || 
-                     child.geometry?.type === 'SphereGeometry')) {
-                    objectsToRemove.push(child);
-                }
-            });
-            objectsToRemove.forEach(obj => {
-                if (obj !== reticle) scene.remove(obj);
-            });
-            
-            updateMarkerCount();
-            showStatus('돔이 초기화되었습니다.', 'info');
-        }
-        
-        function updateDomeSize() {
-            const targetSize = parseFloat(document.getElementById('targetSize').value);
-            const multiplier = parseFloat(document.getElementById('domeMultiplier').value);
-            const domeSize = targetSize * multiplier;
-            document.getElementById('dome-size-display').textContent = `돔 크기: ${domeSize}cm`;
-        }
-        
-        function toggleControls() {
-            const controls = document.getElementById('controls');
-            controlsVisible = !controlsVisible;
-            controls.style.display = controlsVisible ? 'block' : 'none';
-            
-            const btn = event.target;
-            btn.textContent = controlsVisible ? '컨트롤 숨기기' : '컨트롤 보이기';
-        }
-        
-        function updateMarkerCount() {
-            document.getElementById('markerCount').textContent = markers.length;
-        }
-        
-        function showStatus(message, type = 'info') {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = `status ${type}`;
-            status.classList.remove('hidden');
-            
-            setTimeout(() => {
-                status.classList.add('hidden');
-            }, 3000);
-        }
-        
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            if (renderer) {
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            }
-            if (camera) {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-            }
-        }
-        
-        function onWindowResize() {
-            resizeCanvas();
-        }
-        
-        function animate() {
-            requestAnimationFrame(animate);
-            
-            // 레티클이 항상 화면 중앙에 위치하도록 카메라 방향을 따라감
-            if (reticle) {
-                const direction = new THREE.Vector3(0, 0, -1);
-                direction.applyQuaternion(camera.quaternion);
-                reticle.position.copy(camera.position).add(direction.multiplyScalar(0.5));
-                reticle.lookAt(camera.position);
-            }
-            
-            renderer.render(scene, camera);
-        }
-        
-        // 초기화
-        document.addEventListener('DOMContentLoaded', function() {
-            init();
-            
-            // 권한 요청 안내
-            showStatus('카메라 시작 버튼을 눌러 AR 모드를 활성화하세요.', 'info');
-        });
-        
-        // 페이지 종료 시 카메라 스트림 정리
-        window.addEventListener('beforeunload', function() {
-            if (cameraStream) {
-                cameraStream.getTracks().forEach(track => track.stop());
-            }
-        });
-    </script>
+      }
+    }
+
+    function makeTextSprite(txt){
+      const c=document.createElement('canvas'),cx=c.getContext('2d');
+      cx.font='24px sans-serif'; c.width=cx.measureText(txt).width+20; c.height=32;
+      cx.fillStyle='rgba(0,0,0,0.7)'; cx.fillRect(0,0,c.width,c.height);
+      cx.fillStyle='white'; cx.fillText(txt,10,24);
+      const tx=new THREE.CanvasTexture(c), sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx}));
+      sp.scale.set(c.width/200,c.height/200,1); return sp;
+    }
+
+    async function tryFlashAccess(){
+      try{
+        const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+        const tr=st.getVideoTracks()[0], caps=tr.getCapabilities();
+        if (caps.torch){ videoTrack=tr; document.getElementById('flashBtn').disabled=false; }
+      }catch{}
+    }
+    function toggleFlash(){ if (!videoTrack)return; torchOn=!torchOn;
+      videoTrack.applyConstraints({advanced:[{torch:torchOn}]})
+        .then(()=>document.getElementById('flashBtn').textContent=torchOn?'Flash ON':'Flash OFF');
+    }
+    function onResize(){renderer.setSize(window.innerWidth,window.innerHeight);camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();}
+  </script>
 </body>
 </html>

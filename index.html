@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome</title>
+    <title>WebXR RTI Dome (v2)</title>
     <style>
         body { 
             margin: 0; 
@@ -11,7 +11,7 @@
             overflow: hidden; 
             background-color: #000; 
             color: #fff; 
-            overscroll-behavior: none; /* Prevents pull-to-refresh */
+            overscroll-behavior: none;
         }
         #inputContainer {
             position: absolute;
@@ -28,13 +28,16 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
             border: 1px solid rgba(255,255,255,0.1);
         }
-        #inputContainer label {
+        #inputContainer label, #settingsModal label {
             font-size: 0.9em;
             color: #ccc;
             margin-bottom: 3px;
+            display: block;
         }
         #inputContainer input[type="number"], 
-        #inputContainer input[type="text"] {
+        #inputContainer input[type="text"],
+        #settingsModal input[type="number"], 
+        #settingsModal input[type="text"] {
             width: calc(100% - 18px); 
             padding: 10px; 
             border-radius: 6px; 
@@ -43,13 +46,14 @@
             color: #fff;
             font-size: 0.95em;
             box-sizing: border-box;
+            margin-bottom: 8px;
         }
-        #inputContainer input:focus {
+        #inputContainer input:focus, #settingsModal input:focus {
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
         }
-        #inputContainer button {
+        #inputContainer button, #arModeControls button, #settingsModal button {
             padding: 12px 15px; 
             background-color: #007bff; 
             color: white;
@@ -59,11 +63,11 @@
             font-size: 1em;
             transition: background-color 0.2s ease;
         }
-        #inputContainer button:hover {
+        #inputContainer button:hover, #arModeControls button:hover, #settingsModal button:hover {
             background-color: #0056b3;
         }
-        #arButton { /* ARButton.js provides its own styling, this is a fallback/override */
-            position: absolute !important; /* Override ARButton inline styles if necessary */
+        #arButton {
+            position: absolute !important; 
             bottom: 20px !important;
             left: 50% !important;
             transform: translateX(-50%) !important;
@@ -78,7 +82,7 @@
         }
         #statusMessage {
             position: absolute;
-            bottom: 80px; /* Adjusted to be above AR button */
+            bottom: 80px; 
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0,0,0,0.75);
@@ -88,10 +92,69 @@
             z-index: 10;
             text-align: center;
             font-size: 0.9em;
-            display: none; /* Hidden by default */
+            display: none; 
             max-width: 80%;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
+        #arModeControls {
+            display: none; /* Initially hidden */
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #arModeControls button {
+            background-color: #17a2b8; /* Teal color for AR controls */
+            font-size: 0.9em;
+        }
+        #arModeControls button:hover {
+            background-color: #117a8b;
+        }
+        #settingsModal {
+            display: none; /* Initially hidden */
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(30,30,30,0.97);
+            padding: 25px;
+            border-radius: 15px;
+            z-index: 101; /* Higher than AR button */
+            width: 90%;
+            max-width: 380px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        #settingsModal h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #00aeff;
+            text-align: center;
+            font-size: 1.3em;
+        }
+        #settingsModal .modal-actions {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 25px;
+        }
+         #settingsModal .modal-actions button {
+            width: 45%;
+         }
+         #settingsModal #applyModalSettingsButton {
+            background-color: #28a745; /* Green for apply */
+         }
+         #settingsModal #applyModalSettingsButton:hover {
+            background-color: #1e7e34; 
+         }
+         #settingsModal #closeModalButton {
+            background-color: #dc3545; /* Red for close */
+         }
+         #settingsModal #closeModalButton:hover {
+            background-color: #b02a37;
+         }
     </style>
 </head>
 <body>
@@ -115,6 +178,35 @@
         <button id="generateDomeButton">돔 생성/업데이트 (AR 시작 후)</button>
     </div>
 
+    <div id="arModeControls">
+        <button id="arSettingsButton">입력값</button>
+        <button id="torchButton">손전등 켜기</button>
+    </div>
+
+    <div id="settingsModal">
+        <h3>AR 설정</h3>
+        <div>
+            <label for="modalTargetSize">대상 실제 크기 (mm):</label>
+            <input type="number" id="modalTargetSize">
+        </div>
+        <div>
+            <label for="modalRadiusMultiplier">돔 반지름 배율 (2-4):</label>
+            <input type="number" id="modalRadiusMultiplier" min="2" max="4" step="0.1">
+        </div>
+        <div>
+            <label for="modalAzimuths">방위각 리스트 (°):</label>
+            <input type="text" id="modalAzimuths">
+        </div>
+        <div>
+            <label for="modalElevations">고도각 리스트 (°):</label>
+            <input type="text" id="modalElevations">
+        </div>
+        <div class="modal-actions">
+            <button id="applyModalSettingsButton">적용</button>
+            <button id="closeModalButton">닫기</button>
+        </div>
+    </div>
+
     <div id="statusMessage"></div>
 
     <script type="importmap">
@@ -134,9 +226,7 @@
         let reticle; 
         let domeGroup = null; 
         let hitTestSource = null;
-        let hitTestSourceRequested = false;
         
-        // Input values with defaults
         let targetSize = 100; 
         let radiusMultiplier = 3;
         let azimuths = [0, 45, 90, 135, 180, 225, 270, 315];
@@ -145,28 +235,30 @@
         const raycaster = new THREE.Raycaster();
         const statusMessage = document.getElementById('statusMessage');
         const inputContainer = document.getElementById('inputContainer');
+        const arModeControls = document.getElementById('arModeControls');
+        const settingsModal = document.getElementById('settingsModal');
+        const torchButton = document.getElementById('torchButton');
 
-        // For dome dragging interaction
         let isDraggingDome = false;
         let activePointerId = null; 
-        // We use the main hitTestSource for dragging, user points device center to drag target.
+        let currentStream = null;
+        let isTorchOn = false;
 
         init();
         animate();
 
         function init() {
             scene = new THREE.Scene();
-            // Add some lighting to make materials look better
-            scene.add(new THREE.AmbientLight(0x666666, 1));
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
-            directionalLight.position.set(0.5, 1, 0.75);
+            scene.add(new THREE.AmbientLight(0x888888,1)); // Slightly brighter ambient
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5); // Slightly stronger directional
+            directionalLight.position.set(0.5, 1, 0.75).normalize();
             scene.add(directionalLight);
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 40);
 
             reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI / 2), // Adjusted size
-                new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.8, transparent: true, depthTest: false }) // depthTest false to always be visible on surfaces
+                new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.9, transparent: true, depthTest: false, side: THREE.DoubleSide })
             );
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
@@ -178,21 +270,19 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            const arButton = ARButton.createButton(renderer, {
+            const arButtonElement = ARButton.createButton(renderer, {
                 requiredFeatures: ['hit-test', 'dom-overlay'],
                 domOverlay: { root: document.body } 
             });
-            document.body.appendChild(arButton);
-            arButton.id = 'arButton';
-            arButton.style.display = 'block'; // Ensure AR button is always visible if AR is available
+            document.body.appendChild(arButtonElement);
+            arButtonElement.id = 'arButton';
+            arButtonElement.style.display = 'block';
 
-            // Controller for tap events (selectstart)
             controller = renderer.xr.getController(0);
             controller.addEventListener('selectstart', onSelectStart);
-            // controller.addEventListener('selectend', onSelectEnd); // If needed later
             scene.add(controller);
 
-            // Input listeners
+            // Input listeners (main form)
             document.getElementById('targetSize').addEventListener('input', (e) => targetSize = parseFloat(e.target.value) || 100);
             document.getElementById('radiusMultiplier').addEventListener('input', (e) => radiusMultiplier = parseFloat(e.target.value) || 3);
             document.getElementById('azimuths').addEventListener('input', (e) => azimuths = e.target.value.split(',').map(Number).filter(n => !isNaN(n)));
@@ -203,27 +293,16 @@
                     showStatus("AR 세션을 먼저 시작해주세요.", 3000);
                     return;
                 }
-                if (domeGroup && domeGroup.userData.anchor) {
-                    const existingAnchor = domeGroup.userData.anchor;
-                    clearDomeAndChildren(); // Clear old dome visuals
-                    domeGroup = createDome();
-                    domeGroup.userData.anchor = existingAnchor; // Re-assign anchor
-                    // The render loop will position it based on the anchor
-                    scene.add(domeGroup);
-                    showStatus("돔 업데이트 완료.", 2000);
-                } else if (domeGroup && !domeGroup.userData.anchor) { // Dome exists but not anchored (fallback placement)
-                     clearDomeAndChildren();
-                     domeGroup = createDome();
-                     // User needs to re-place it.
-                     scene.add(domeGroup); // Add to scene, will be positioned by user tap
-                     reticle.visible = true; // Show reticle to allow re-placement
-                     showStatus("돔 업데이트됨. 레티클로 다시 배치하세요.", 3000);
-                } else {
-                    showStatus("돔을 먼저 배치하세요. 레티클을 바닥/벽에 조준하고 탭하세요.", 3000);
-                }
+                updateAndPlaceDome();
             });
 
-            window.addEventListener('resize', onWindowResize);
+            // AR Mode Controls Listeners
+            document.getElementById('arSettingsButton').addEventListener('click', openSettingsModal);
+            torchButton.addEventListener('click', toggleTorch);
+
+            // Settings Modal Listeners
+            document.getElementById('applyModalSettingsButton').addEventListener('click', applySettingsFromModal);
+            document.getElementById('closeModalButton').addEventListener('click', closeSettingsModal);
             
             // Initialize from HTML defaults
             targetSize = parseFloat(document.getElementById('targetSize').value);
@@ -231,14 +310,117 @@
             azimuths = document.getElementById('azimuths').value.split(',').map(Number).filter(n => !isNaN(n));
             elevations = document.getElementById('elevations').value.split(',').map(Number).filter(n => !isNaN(n));
 
-            // Pointer events for dome dragging (using standard pointer events on canvas)
             renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
             renderer.domElement.addEventListener('pointermove', onPointerMove, false);
             renderer.domElement.addEventListener('pointerup', onPointerUp, false);
             renderer.domElement.addEventListener('pointercancel', onPointerUp, false);
+            
+            window.addEventListener('resize', onWindowResize);
 
+            // Handle XR session start/end for UI changes and hit-test setup
+            renderer.xr.addEventListener('sessionstart', async () => {
+                const session = renderer.xr.getSession();
+                showStatus("AR 세션 시작됨. 표면을 찾아 레티클을 조준하고 탭하여 돔 배치.", 0); // Persistent until first placement
+                inputContainer.style.display = 'none';
+                arModeControls.style.display = 'flex'; // Use flex for column layout
+
+                try {
+                    const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
+                    hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace });
+                    reticle.visible = true; // Show reticle once hit-test is available
+                } catch (error) {
+                    console.error("Hit-test source 요청 실패:", error);
+                    showStatus("Hit-test를 시작할 수 없습니다. AR 기능이 제한될 수 있습니다.", 4000);
+                    reticle.visible = false;
+                }
+                
+                // Attempt to get camera stream for torch control
+                try {
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                         // Try to get the video track used by WebXR (this is speculative)
+                        const tracks = session.inputSources?.flatMap(inputSource => inputSource.gripSpace ? [] : (inputSource.gamepad?.hapticActuators || []));
+                        // This is a very indirect way and might not work.
+                        // A more robust way (if WebXR spec evolves) would be needed.
+                        // For now, we'll try a general camera access.
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                        currentStream = stream;
+                    }
+                } catch (err) {
+                    console.warn("카메라 접근 실패 (손전등용):", err);
+                }
+
+            });
+
+            renderer.xr.addEventListener('sessionend', () => {
+                hitTestSource = null;
+                reticle.visible = false;
+                clearDomeAndChildren();
+                showStatus("AR 세션 종료됨.", 3000);
+                inputContainer.style.display = 'flex';
+                arModeControls.style.display = 'none';
+                closeSettingsModal(); // Close modal if open
+                if (isTorchOn) { // Turn off torch if it was on
+                    controlTorch(false); 
+                    isTorchOn = false;
+                    torchButton.textContent = "손전등 켜기";
+                }
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                    currentStream = null;
+                }
+            });
             showStatus("AR 세션을 시작하고, 바닥이나 벽을 탭하여 돔을 배치하세요.", 5000);
         }
+        
+        function updateAndPlaceDome(hitMatrix = null) {
+            if (domeGroup && domeGroup.userData.anchor && !hitMatrix) { // Update existing anchored dome
+                const existingAnchor = domeGroup.userData.anchor;
+                clearDomeAndChildren();
+                domeGroup = createDome();
+                domeGroup.userData.anchor = existingAnchor;
+                scene.add(domeGroup);
+                showStatus("돔 설정 업데이트 완료.", 2000);
+            } else if (domeGroup && !domeGroup.userData.anchor && !hitMatrix) { // Update existing non-anchored dome
+                const oldPosition = domeGroup.position.clone();
+                const oldQuaternion = domeGroup.quaternion.clone();
+                clearDomeAndChildren();
+                domeGroup = createDome();
+                domeGroup.position.copy(oldPosition);
+                domeGroup.quaternion.copy(oldQuaternion);
+                scene.add(domeGroup);
+                showStatus("돔 설정 업데이트 완료. (앵커 없음)", 2000);
+            } else if (hitMatrix) { // Place new dome at hitMatrix
+                clearDomeAndChildren();
+                domeGroup = createDome();
+                // Attempt to create anchor
+                const session = renderer.xr.getSession();
+                const frame = renderer.xr.getFrame(); // Get current frame for anchor creation
+                if (session && frame && hitMatrix.userData?.hitTestResult) { // Check if hitTestResult is passed
+                    const hit = hitMatrix.userData.hitTestResult;
+                    const referenceSpace = renderer.xr.getReferenceSpace();
+                    hit.createAnchor().then(anchor => {
+                        domeGroup.userData.anchor = anchor;
+                        scene.add(domeGroup);
+                        reticle.visible = false; // Hide reticle after placing with anchor
+                        showStatus("돔 배치 완료 (앵커 사용).", 3000);
+                    }).catch(err => {
+                        console.warn("앵커 생성 실패:", err);
+                        domeGroup.applyMatrix4(hitMatrix); // Fallback to matrix placement
+                        scene.add(domeGroup);
+                        reticle.visible = true; // Keep reticle if anchor fails, for re-adjustment
+                        showStatus("돔 배치 완료 (앵커 실패, 직접 배치).", 3000);
+                    });
+                } else { // Fallback if anchor creation is not possible
+                    domeGroup.applyMatrix4(hitMatrix);
+                    scene.add(domeGroup);
+                    reticle.visible = true; // Keep reticle if no anchor possible
+                    showStatus("돔 배치 완료 (앵커 정보 없음).", 3000);
+                }
+            } else {
+                 showStatus("돔을 먼저 배치하세요. 레티클을 바닥/벽에 조준하고 탭하세요.", 3000);
+            }
+        }
+
 
         function showStatus(message, duration = 3000) {
             statusMessage.textContent = message;
@@ -253,79 +435,57 @@
         
         function clearDomeAndChildren() {
             if (!domeGroup) return;
-            // Dispose of geometries and materials to free resources
             domeGroup.traverse(child => {
                 if (child.isMesh) {
                     if (child.geometry) child.geometry.dispose();
                     if (child.material) {
                         if (Array.isArray(child.material)) {
                             child.material.forEach(m => {
-                                if (m.map) m.map.dispose();
-                                m.dispose();
+                                if (m.map) m.map.dispose(); m.dispose();
                             });
                         } else {
-                            if (child.material.map) child.material.map.dispose();
-                            child.material.dispose();
+                            if (child.material.map) child.material.map.dispose(); child.material.dispose();
                         }
                     }
                 }
-                if (child.isSprite && child.material) { // For text sprites
-                     if (child.material.map) child.material.map.dispose();
-                     child.material.dispose();
+                if (child.isSprite && child.material) {
+                     if (child.material.map) child.material.map.dispose(); child.material.dispose();
                 }
             });
             scene.remove(domeGroup);
-            if (domeGroup.userData.anchor && domeGroup.userData.anchor.delete) {
-                // Anchors don't have a .delete() method in standard WebXR.
-                // They are managed by the session. We just nullify our reference.
-            }
             domeGroup.userData.anchor = null; 
             domeGroup = null;
         }
 
         function createDome() {
             const newDomeGroup = new THREE.Group();
-            const actualRadius = Math.max(0.01, (targetSize * radiusMultiplier) / 1000); // Ensure positive radius
+            const actualRadius = Math.max(0.01, (targetSize * radiusMultiplier) / 1000); 
 
-            // Dome Hemisphere
             const domeGeometry = new THREE.SphereGeometry(actualRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
             const domeMaterial = new THREE.MeshStandardMaterial({
-                color: 0x101010,
-                transparent: true,
-                opacity: 0.65,
-                side: THREE.DoubleSide,
-                metalness: 0.1,
-                roughness: 0.9,
+                color: 0x101010, transparent: true, opacity: 0.65, side: THREE.DoubleSide,
+                metalness: 0.1, roughness: 0.9,
             });
             const hemisphere = new THREE.Mesh(domeGeometry, domeMaterial);
             hemisphere.userData.isDomePart = true; 
             newDomeGroup.add(hemisphere);
 
-            // Lighting Markers
             const markerRadius = Math.max(0.003, actualRadius * 0.025); 
             const markerGeometry = new THREE.SphereGeometry(markerRadius, 12, 6);
             const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.3, roughness: 0.4 });
 
             (elevations || []).forEach(el => {
                 (azimuths || []).forEach(az => {
-                    if (isNaN(el) || isNaN(az)) return; // Skip if not a number
+                    if (isNaN(el) || isNaN(az)) return;
                     const elRad = THREE.MathUtils.degToRad(el);
                     const azRad = THREE.MathUtils.degToRad(az);
-
-                    // Spherical to Cartesian for Y-up coordinate system
                     const x = actualRadius * Math.cos(elRad) * Math.cos(azRad);
                     const y = actualRadius * Math.sin(elRad); 
                     const z = actualRadius * Math.cos(elRad) * Math.sin(azRad);
 
-                    const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone()); // Clone material for safety
+                    const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
                     marker.position.set(x, y, z);
-                    marker.userData = {
-                        isLightMarker: true,
-                        azimuth: az,
-                        elevation: el,
-                        labelMesh: null,
-                        isLabelVisible: false
-                    };
+                    marker.userData = { isLightMarker: true, azimuth: az, elevation: el, labelMesh: null, isLabelVisible: false };
                     newDomeGroup.add(marker);
                 });
             });
@@ -334,61 +494,46 @@
             return newDomeGroup;
         }
 
-        async function onSelectStart(event) {
-            const currentSession = renderer.xr.getSession();
-            if (!currentSession) return;
+        function onSelectStart(event) {
+            const session = renderer.xr.getSession();
+            if (!session) return;
 
-            if (reticle.visible) { 
-                // Attempt to place the dome using an anchor
-                if (!hitTestSource) return;
+            if (reticle.visible && hitTestSource) { 
+                const frame = renderer.xr.getFrame();
+                if (!frame) return;
 
-                // Get hit test results from the frame associated with this select event
-                const frame = renderer.xr.getFrame(); // Get current frame
                 const hitTestResults = frame.getHitTestResults(hitTestSource);
-
                 if (hitTestResults.length > 0) {
                     const hit = hitTestResults[0];
                     const referenceSpace = renderer.xr.getReferenceSpace();
+                    const hitPose = hit.getPose(referenceSpace);
                     
-                    clearDomeAndChildren(); // Clear any existing dome
-                    domeGroup = createDome();
-
-                    try {
-                        const anchor = await hit.createAnchor();
-                        domeGroup.userData.anchor = anchor;
-                        // Position will be updated in render loop based on anchor
-                        scene.add(domeGroup);
-                        reticle.visible = false;
-                        showStatus("돔 배치 완료 (앵커 사용). 돔을 길게 눌러 이동.", 3000);
-                    } catch (error) {
-                        console.warn("앵커 생성 실패:", error);
-                        // Fallback: Place directly at hit point without anchor
-                        const hitPose = hit.getPose(referenceSpace);
-                        if (hitPose) {
-                            domeGroup.position.copy(hitPose.transform.position);
-                            domeGroup.quaternion.copy(hitPose.transform.orientation);
-                        }
-                        scene.add(domeGroup);
-                        reticle.visible = false;
-                        showStatus("돔 배치 완료 (앵커 실패, 직접 배치).", 3000);
+                    if (hitPose) {
+                        const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+                        hitMatrix.userData = { hitTestResult: hit }; // Pass hit for anchor creation
+                        updateAndPlaceDome(hitMatrix);
+                    } else {
+                         showStatus("위치 감지 실패. 다시 시도하세요.", 2000);
                     }
+                } else {
+                    showStatus("표면 감지 실패. 다른 곳을 조준하세요.", 2000);
                 }
             } else if (domeGroup) { 
-                // Dome is placed, check for marker interaction using controller's ray
                 const controller = event.target; 
                 const tempMatrix = new THREE.Matrix4();
                 tempMatrix.identity().extractRotation(controller.matrixWorld); 
                 raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld); 
                 raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix); 
 
-                const intersects = raycaster.intersectObject(domeGroup, true); // Check children too
-
+                const intersects = raycaster.intersectObject(domeGroup, true);
                 if (intersects.length > 0) {
                     const firstIntersected = intersects[0].object;
                     if (firstIntersected.userData.isLightMarker) {
                         toggleMarkerLabel(firstIntersected);
                     }
                 }
+            } else if (!hitTestSource) {
+                showStatus("표면 감지 기능을 초기화 중입니다. 잠시 후 다시 시도하세요.", 2500);
             }
         }
         
@@ -398,17 +543,15 @@
                 if (!marker.userData.labelMesh) {
                     const labelText = `${marker.userData.azimuth}°, ${marker.userData.elevation}°`;
                     marker.userData.labelMesh = createTextSprite(labelText, { 
-                        fontsize: 28, // Slightly larger for better readability
-                        fontface: "Arial", 
+                        fontsize: 28, fontface: "Arial", 
                         textColor: { r:255, g:255, b:255, a:1.0 },
                         backgroundColor: { r:30, g:30, b:30, a:0.7 }
                     });
                     
                     const domeRadius = domeGroup.children.find(c => c.userData.isDomePart)?.geometry.parameters.radius || 1;
-                    const labelScaleFactor = domeRadius * 0.07; // Adjust scale relative to dome size
-                    marker.userData.labelMesh.scale.set(labelScaleFactor * 2, labelScaleFactor, labelScaleFactor); // Make width relatively larger
+                    const labelScaleFactor = domeRadius * 0.07; 
+                    marker.userData.labelMesh.scale.set(labelScaleFactor * 2, labelScaleFactor, labelScaleFactor); 
 
-                    // Position label slightly above the marker, relative to marker's orientation within dome
                     const offset = new THREE.Vector3(0, marker.geometry.parameters.radius * 3.5, 0);
                     marker.userData.labelMesh.position.copy(marker.position).add(offset);
                     
@@ -426,29 +569,26 @@
             const fontface = parameters.fontface || 'Arial';
             const fontsize = parameters.fontsize || 20;
             const borderThickness = parameters.borderThickness || 0;
-            const borderColor = parameters.borderColor || { r:0, g:0, b:0, a:0.0 }; // Transparent border default
+            const borderColor = parameters.borderColor || { r:0, g:0, b:0, a:0.0 };
             const backgroundColor = parameters.backgroundColor || { r:0, g:0, b:0, a:0.5 };
             const textColor = parameters.textColor || { r:255, g:255, b:255, a:1.0 };
             const padding = parameters.padding || 10;
 
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            
             context.font = `Bold ${fontsize}px ${fontface}`;
             const metrics = context.measureText(message);
             const textWidth = metrics.width;
             
             canvas.width = textWidth + padding * 2 + borderThickness * 2;
-            canvas.height = fontsize * 1.4 + padding * 2 + borderThickness * 2; // Adjusted height calculation
-
-            context.font = `Bold ${fontsize}px ${fontface}`; // Re-set font after canvas resize
+            canvas.height = fontsize * 1.4 + padding * 2 + borderThickness * 2; 
+            context.font = `Bold ${fontsize}px ${fontface}`; 
             
-            // Background
             context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
             context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
             context.lineWidth = borderThickness;
             
-            const radius = 8; // Rounded corners
+            const radius = 8; 
             context.beginPath();
             context.moveTo(radius + borderThickness, borderThickness);
             context.lineTo(canvas.width - radius - borderThickness, borderThickness);
@@ -463,7 +603,6 @@
             context.fill();
             if (borderThickness > 0) context.stroke();
 
-            // Text
             context.fillStyle = `rgba(${textColor.r},${textColor.g},${textColor.b},${textColor.a})`;
             context.textAlign = 'center';
             context.textBaseline = 'middle';
@@ -471,17 +610,14 @@
 
             const texture = new THREE.CanvasTexture(canvas);
             texture.needsUpdate = true;
-
-            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false }); // depthTest false for labels
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
             const sprite = new THREE.Sprite(spriteMaterial);
-            // Scale sprite appropriately. This might need adjustment.
             sprite.scale.set(canvas.width / 100, canvas.height / 100, 1.0); 
             return sprite;
         }
 
         function onPointerDown(event) {
             if (!renderer.xr.isPresenting || !domeGroup ) return;
-            // Prioritize AR controller 'select' for taps. This handles longer presses for dragging.
             if (event.pointerType === 'mouse' && event.button !== 0) return;
 
             const clickX = (event.clientX / window.innerWidth) * 2 - 1;
@@ -491,13 +627,12 @@
             const intersects = raycaster.intersectObject(domeGroup, true);
             if (intersects.length > 0) {
                 const firstIntersected = intersects[0].object;
-                 // Check if it's part of the dome itself (not a marker, which is handled by 'select')
                 if (firstIntersected.userData.isDomePart || domeGroup.children.includes(firstIntersected)) { 
                     isDraggingDome = true;
                     activePointerId = event.pointerId;
-                    renderer.domElement.setPointerCapture(event.pointerId); // Capture pointer for smooth dragging
-                    showStatus("돔 이동 중... 기기 중앙을 원하는 위치로 조준하며 드래그.", 0); // No timeout
-                    reticle.visible = true; // Show reticle to guide dragging
+                    renderer.domElement.setPointerCapture(event.pointerId);
+                    showStatus("돔 이동 중... 기기 중앙을 원하는 위치로 조준하며 드래그.", 0);
+                    if (!domeGroup.userData.anchor) reticle.visible = true; // Show reticle if not anchored
                 }
             }
         }
@@ -506,7 +641,7 @@
             if (!isDraggingDome || event.pointerId !== activePointerId || !renderer.xr.isPresenting) {
                 return;
             }
-            // Dragging logic is handled in the render loop using hitTestSource based on device pointing
+            // Dragging logic is in render loop
         }
 
         function onPointerUp(event) {
@@ -515,13 +650,112 @@
                 isDraggingDome = false;
                 activePointerId = null;
                 renderer.domElement.releasePointerCapture(event.pointerId);
-                showStatus("돔 이동 완료.", 2000);
-                if (domeGroup && domeGroup.userData.anchor) { // If anchored, reticle can be hidden
-                    reticle.visible = false;
+                
+                if (domeGroup && reticle.visible && !domeGroup.userData.anchor) {
+                    // Try to re-anchor or place at the reticle position if dragging a non-anchored dome
+                    const frame = renderer.xr.getFrame();
+                    if (frame && hitTestSource) {
+                        const hitTestResults = frame.getHitTestResults(hitTestSource);
+                        if (hitTestResults.length > 0) {
+                            const hit = hitTestResults[0];
+                            const referenceSpace = renderer.xr.getReferenceSpace();
+                            const hitPose = hit.getPose(referenceSpace);
+                            if (hitPose) {
+                                domeGroup.position.copy(hitPose.transform.position);
+                                domeGroup.quaternion.copy(hitPose.transform.orientation);
+                                showStatus("돔 이동 완료.", 2000);
+                                // Optionally, try to create a new anchor here if desired
+                            }
+                        }
+                    }
+                } else {
+                    showStatus("돔 이동 완료.", 2000);
                 }
-                // If not anchored, reticle might need to stay visible if placement failed.
+                
+                if (domeGroup && domeGroup.userData.anchor) { 
+                    reticle.visible = false; // Hide reticle if dome is anchored
+                } else if (!domeGroup) { // If dome was somehow removed during drag
+                    reticle.visible = true;
+                }
+                // If not anchored, reticle might stay visible if it was shown during drag
             }
         }
+        
+        // AR Modal functions
+        function openSettingsModal() {
+            document.getElementById('modalTargetSize').value = targetSize;
+            document.getElementById('modalRadiusMultiplier').value = radiusMultiplier;
+            document.getElementById('modalAzimuths').value = azimuths.join(',');
+            document.getElementById('modalElevations').value = elevations.join(',');
+            settingsModal.style.display = 'block';
+        }
+
+        function closeSettingsModal() {
+            settingsModal.style.display = 'none';
+        }
+
+        function applySettingsFromModal() {
+            targetSize = parseFloat(document.getElementById('modalTargetSize').value) || 100;
+            radiusMultiplier = parseFloat(document.getElementById('modalRadiusMultiplier').value) || 3;
+            azimuths = document.getElementById('modalAzimuths').value.split(',').map(Number).filter(n => !isNaN(n));
+            elevations = document.getElementById('modalElevations').value.split(',').map(Number).filter(n => !isNaN(n));
+            
+            // Update main form inputs as well for consistency
+            document.getElementById('targetSize').value = targetSize;
+            document.getElementById('radiusMultiplier').value = radiusMultiplier;
+            document.getElementById('azimuths').value = azimuths.join(',');
+            document.getElementById('elevations').value = elevations.join(',');
+
+            closeSettingsModal();
+            showStatus("설정 적용됨. 돔이 배치되어 있다면 업데이트됩니다.", 2500);
+            if (renderer.xr.isPresenting && domeGroup) {
+                updateAndPlaceDome(); // Update existing dome without moving it unless it's a new placement
+            }
+        }
+
+        // Torch function
+        async function controlTorch(enable) {
+            if (!currentStream) {
+                 try { // Try to get stream again if not available
+                    currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                 } catch(err) {
+                    console.error("손전등 제어를 위한 카메라 스트림 확보 실패:", err);
+                    showStatus("손전등 제어 불가: 카메라 접근 실패", 2500);
+                    return false;
+                 }
+            }
+
+            const videoTrack = currentStream.getVideoTracks()[0];
+            if (!videoTrack) {
+                showStatus("손전등 제어 불가: 비디오 트랙 없음", 2500);
+                return false;
+            }
+
+            const capabilities = videoTrack.getCapabilities();
+            if (!capabilities.torch) {
+                showStatus("이 기기/브라우저에서는 손전등 기능을 지원하지 않습니다.", 3000);
+                return false;
+            }
+
+            try {
+                await videoTrack.applyConstraints({
+                    advanced: [{ torch: enable }]
+                });
+                isTorchOn = enable;
+                torchButton.textContent = enable ? "손전등 끄기" : "손전등 켜기";
+                showStatus(enable ? "손전등 켜짐" : "손전등 꺼짐", 1500);
+                return true;
+            } catch (err) {
+                console.error("손전등 제어 실패:", err);
+                showStatus("손전등 제어 중 오류 발생", 2500);
+                return false;
+            }
+        }
+        
+        async function toggleTorch() {
+            await controlTorch(!isTorchOn);
+        }
+
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -535,96 +769,57 @@
 
         function render(timestamp, frame) {
             const session = renderer.xr.getSession();
-            if (!session) { // Not in AR session
-                if (inputContainer.style.display === 'none') inputContainer.style.display = 'flex';
-                renderer.render(scene, camera); // Render normally if not in AR (e.g. for non-AR fallback)
+            if (!session) {
+                renderer.render(scene, camera);
                 return;
             }
             
-            if (frame) { // In AR session
+            if (frame && hitTestSource) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 if (!referenceSpace) return;
 
-                if (inputContainer.style.display !== 'none') inputContainer.style.display = 'none';
-
-                if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then(viewerSpace => {
-                        session.requestHitTestSource({ space: viewerSpace }).then(source => {
-                            hitTestSource = source;
-                        });
-                    });
-                    session.addEventListener('end', () => {
-                        hitTestSourceRequested = false;
-                        hitTestSource = null;
-                        reticle.visible = false;
-                        clearDomeAndChildren();
-                        showStatus("AR 세션 종료됨.", 3000);
-                        inputContainer.style.display = 'flex';
-                    });
-                    hitTestSourceRequested = true;
-                    showStatus("AR 세션 시작됨. 바닥/벽을 조준하고 탭하여 돔 배치.", 0);
-                }
-
-                if (hitTestSource) {
-                    // Update reticle or drag dome based on hit-test
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length > 0) {
-                        const hit = hitTestResults[0];
-                        const hitPose = hit.getPose(referenceSpace);
-
-                        if (hitPose) {
-                            if (reticle.visible && !isDraggingDome) { // Update reticle if visible and not dragging
-                                reticle.matrix.fromArray(hitPose.transform.matrix);
-                            }
-                            
-                            if (isDraggingDome && domeGroup) { // If dragging, move the dome
-                                domeGroup.position.copy(hitPose.transform.position);
-                                // domeGroup.quaternion.copy(hitPose.transform.orientation); // Optional: align with surface
-
-                                // If anchored, dragging moves it away from its anchor.
-                                // To re-anchor, we'd need to create a new anchor on pointer up.
-                                // For simplicity now, dragging just moves the visual object.
-                                // The anchor reference is kept, but the object is no longer strictly at anchor pose.
-                                // This is a common compromise.
-                                if (domeGroup.userData.anchor) {
-                                     // The dome is now visually detached from its original anchor pose.
-                                     // We could nullify the anchor here, or attempt to create a new one on pointerUp.
-                                     // For now, let's assume the user might want to "snap" it back or re-anchor later.
-                                }
-                            }
-                        }
-                    } else {
+                const hitTestResults = frame.getHitTestResults(hitTestSource);
+                if (hitTestResults.length > 0) {
+                    const hit = hitTestResults[0];
+                    const hitPose = hit.getPose(referenceSpace);
+                    if (hitPose) {
                         if (reticle.visible && !isDraggingDome) {
-                            // No hit, but reticle was visible. Optionally hide it or indicate no surface.
-                            // reticle.visible = false; 
+                            reticle.matrix.fromArray(hitPose.transform.matrix);
+                        }
+                        if (isDraggingDome && domeGroup && !domeGroup.userData.anchor) { // Drag non-anchored dome
+                            domeGroup.position.copy(hitPose.transform.position);
+                            // domeGroup.quaternion.copy(hitPose.transform.orientation); // Optional alignment
+                        } else if (isDraggingDome && domeGroup && domeGroup.userData.anchor) {
+                            // For anchored domes, dragging means we are trying to find a NEW spot.
+                            // The dome itself doesn't move with the anchor anymore.
+                            // We can update its position based on hit-test for visual feedback.
+                            domeGroup.position.copy(hitPose.transform.position);
+                            // On pointerUp, a new anchor could be created at this spot.
                         }
                     }
+                } else {
+                    // No hits, but reticle might still be visible if it was from a previous frame
                 }
-                
-                // Update anchored dome's position if not being dragged
-                if (domeGroup && domeGroup.userData.anchor && !isDraggingDome) {
-                    const anchor = domeGroup.userData.anchor;
-                    if (anchor.anchorSpace) { // XRAnchor
-                        const pose = frame.getPose(anchor.anchorSpace, referenceSpace);
-                        if (pose) {
-                            domeGroup.position.copy(pose.transform.position);
-                            domeGroup.quaternion.copy(pose.transform.orientation);
-                        } else {
-                            // Anchor pose could not be determined, object might disappear or be at origin
-                            // This can happen if tracking is lost for the anchor
-                            // console.warn("Could not get pose for anchor.");
-                        }
+            }
+            
+            // Update anchored dome's position if it exists and not being actively dragged to a new spot
+            if (domeGroup && domeGroup.userData.anchor && !isDraggingDome) {
+                const anchor = domeGroup.userData.anchor;
+                // Check if the anchor is still valid/tracked by the session
+                if (frame && anchor.anchorSpace) { // XRAnchor has anchorSpace
+                    const pose = frame.getPose(anchor.anchorSpace, renderer.xr.getReferenceSpace());
+                    if (pose) {
+                        domeGroup.position.copy(pose.transform.position);
+                        domeGroup.quaternion.copy(pose.transform.orientation);
+                    } else {
+                        // Anchor lost tracking
+                        // console.warn("Anchor pose could not be determined. It might be out of view or tracking lost.");
+                        // Optionally hide the dome or indicate lost tracking
                     }
-                }
-                
-                // Show reticle if no dome is placed and in AR mode with hit-test source
-                if (!domeGroup && hitTestSource && !reticle.visible && !isDraggingDome) {
-                    reticle.visible = true;
                 }
             }
             renderer.render(scene, camera);
         }
-
     </script>
 </body>
 </html>

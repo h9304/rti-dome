@@ -3,46 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR AR Dome Interactive (카메라+AR)</title>
+  <title>WebXR AR Dome with Hit Test</title>
   <style>
-    body { margin:0; overflow:hidden; font-family:sans-serif; background:#111; color:#eee; }
+    body { margin: 0; overflow: hidden; font-family: sans-serif; background: #111; color: #eee; }
     #ui {
-      position:absolute; top:10px; left:10px;
-      background:rgba(0,0,0,0.7); padding:12px; border-radius:8px;
-      z-index:10; max-width:260px;
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;
+      z-index: 10; max-width: 260px;
     }
-    #ui label { display:block; font-size:13px; margin-top:8px; }
-    #ui input, #ui select { width:100%; padding:4px; margin-top:4px; border-radius:4px; border:none; }
-    button { margin-top:10px; width:100%; padding:8px; border:none; border-radius:4px; background:#28a745; color:#fff; font-weight:bold; cursor:pointer; }
+    #ui label { display: block; font-size: 13px; margin-top: 8px; }
+    #ui input, #ui select {
+      width: 100%; padding: 4px; margin-top: 4px;
+      border-radius: 4px; border: none;
+    }
+    button {
+      margin-top: 10px; width: 100%; padding: 8px;
+      border: none; border-radius: 4px;
+      background: #28a745; color: #fff;
+      font-weight: bold; cursor: pointer;
+    }
     #flashBtn {
-      position:absolute; bottom:24px; right:16px;
-      background:#ffc107; color:#000; padding:14px 18px; border:none; border-radius:50%;
-      font-size:16px; cursor:pointer; z-index:10; box-shadow:0 4px 20px #0004;
-      transition:background 0.2s;
+      position: absolute; bottom: 24px; right: 16px;
+      background: #ffc107; color: #000;
+      padding: 14px 18px; border: none;
+      border-radius: 50%; font-size: 16px;
+      cursor: pointer; z-index: 10;
+      box-shadow: 0 4px 20px #0004;
     }
-    #flashBtn:active { background:#e0a800; }
-    #crosshair {
-      position:absolute; top:50%; left:50%; width:36px; height:36px;
-      margin:-18px 0 0 -18px; border:2.5px solid #fff; border-radius:50%; pointer-events:none; z-index:100;
-      background:rgba(0,0,0,0.09);
-      box-shadow:0 0 12px 2px #00f2,0 0 0 3px #111c;
-      display:block;
-    }
-    #crosshair::before {
-      content:'';
-      position:absolute;left:50%;top:50%;
-      transform:translate(-50%,-50%);
-      width:5px; height:5px; border-radius:50%; background:#fff;
-      box-shadow:0 0 7px #00f2,0 0 0 2px #111a;
-    }
-    #videoBg {
-      position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:0;object-fit:cover; background:#000;
-      pointer-events:none;display:block;
+    #reticle {
+      position: absolute;
+      width: 30px; height: 30px;
+      border: 2px solid white; border-radius: 50%;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 9;
     }
   </style>
 </head>
 <body>
-  <video id="videoBg" autoplay muted playsinline></video>
   <div id="ui">
     <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
     <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
@@ -51,160 +50,148 @@
     <button id="generate">돔 생성</button>
   </div>
   <button id="flashBtn" disabled>🔦</button>
-  <div id="crosshair"></div>
+  <div id="reticle"></div>
 
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
     import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
 
-    let camera, scene, renderer, domeGroup, transformControls;
-    let videoTrack = null, torchOn = false, videoStream = null;
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    let ground;
+    let camera, scene, renderer, controller, reticle, hitTestSource = null, hitTestSourceRequested = false;
+    let domeGroup = null;
+    let videoTrack = null, torchOn = false;
 
-    // ---- 카메라(비디오) 백그라운드 활성화 ----
-    startCameraBg();
-    async function startCameraBg() {
+    init();
+
+    function init() {
+      scene = new THREE.Scene();
+
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
+      controller = renderer.xr.getController(0);
+      scene.add(controller);
+
+      // Reticle for AR hit test
+      const geometry = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
+      const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      reticle = new THREE.Mesh(geometry, material);
+      reticle.matrixAutoUpdate = false;
+      reticle.visible = false;
+      scene.add(reticle);
+
+      document.getElementById('generate').addEventListener('click', () => {
+        if (reticle.visible) {
+          const radius = getRadius();
+          const azs = getArray('azimuths');
+          const els = getArray('elevations');
+          generateDome(radius, azs, els, new THREE.Vector3().setFromMatrixPosition(reticle.matrix));
+        }
+      });
+
+      document.getElementById('flashBtn').addEventListener('click', toggleFlash);
+      tryFlashAccess();
+
+      renderer.setAnimationLoop(render);
+    }
+
+    function render(timestamp, frame) {
+      if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
+
+        if (!hitTestSourceRequested) {
+          session.requestReferenceSpace('viewer').then(refSpace => {
+            session.requestHitTestSource({ space: refSpace }).then(source => {
+              hitTestSource = source;
+            });
+          });
+          session.addEventListener('end', () => { hitTestSourceRequested = false; hitTestSource = null; });
+          hitTestSourceRequested = true;
+        }
+
+        if (hitTestSource) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.matrix.fromArray(pose.transform.matrix);
+          } else {
+            reticle.visible = false;
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    function getRadius() {
+      const size = parseFloat(document.getElementById('targetSize').value);
+      const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
+      return (size * multiplier) / 1000;
+    }
+
+    function getArray(id) {
+      return document.getElementById(id).value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+    }
+
+    function generateDome(radius, azimuths, elevations, position) {
+      if (domeGroup) scene.remove(domeGroup);
+      domeGroup = new THREE.Group();
+
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+      );
+      domeGroup.add(dome);
+
+      const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+      azimuths.forEach(az => {
+        elevations.forEach(el => {
+          const theta = THREE.MathUtils.degToRad(az);
+          const phi = THREE.MathUtils.degToRad(el);
+          const x = radius * Math.cos(phi) * Math.sin(theta);
+          const y = radius * Math.sin(phi);
+          const z = radius * Math.cos(phi) * Math.cos(theta);
+          const marker = new THREE.Mesh(markerGeo, markerMat);
+          marker.position.set(x, y, z);
+          marker.userData.label = `${az}°, ${el}°`;
+          domeGroup.add(marker);
+        });
+      });
+
+      domeGroup.position.copy(position);
+      scene.add(domeGroup);
+    }
+
+    async function tryFlashAccess() {
       try {
-        videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-        document.getElementById('videoBg').srcObject = videoStream;
-        // 플래시 트랙도 여기서 가져오기
-        const track = videoStream.getVideoTracks()[0], caps = track.getCapabilities();
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities();
         if (caps.torch) {
           videoTrack = track;
           document.getElementById('flashBtn').disabled = false;
         }
-      } catch (e) {
-        alert('카메라 접근 실패: '+e.message);
-      }
+      } catch {}
     }
 
-    init();
-    function init() {
-      scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
-
-      renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled = true;
-      document.body.appendChild(renderer.domElement);
-      document.body.appendChild(ARButton.createButton(renderer));
-
-      // 지면 평면 (드러나지 않음, raycast 용)
-      ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(10,10),
-        new THREE.MeshBasicMaterial({ visible:false })
-      );
-      ground.rotation.x = -Math.PI/2; ground.position.y = 0;
-      scene.add(ground);
-
-      // light
-      const light = new THREE.DirectionalLight(0xffffff,1);
-      light.position.set(5,10,7.5);
-      scene.add(light);
-
-      document.getElementById('generate').onclick = () => {
-        const radius = getRadius();
-        const azs = getArray('azimuths');
-        const els = getArray('elevations');
-        // 레티클 기준 중앙 raycast (지면과 교차점)
-        raycaster.setFromCamera({x:0,y:0}, camera);
-        const hits = raycaster.intersectObject(ground);
-        if (hits.length>0) generateDome(radius, azs, els, hits[0].point);
-      };
-      document.getElementById('flashBtn').onclick = toggleFlash;
-
-      window.addEventListener('click', onSceneClick);
-      window.addEventListener('resize', onResize);
-
-      // 레티클 위치 시각화: 렌더 루프에서 투명도/명암 살짝 변경
-      renderer.setAnimationLoop(() => {
-        // 교차점 확인
-        raycaster.setFromCamera({x:0,y:0}, camera);
-        const hits = raycaster.intersectObject(ground);
-        const crosshair = document.getElementById('crosshair');
-        if (hits.length>0 && hits[0].distance < 15) {
-          crosshair.style.display = 'block';
-          // 깊이 연출: 가까우면 더 진하게, 멀면 흐리게
-          let o = Math.max(0.11, 0.33-Math.min(hits[0].distance,6)/20);
-          crosshair.style.boxShadow = `0 0 12px 2px #0afc,0 0 0 3px #111c`;
-          crosshair.style.background = `rgba(0,0,0,${o})`;
-        } else {
-          crosshair.style.display = 'none';
-        }
-        renderer.render(scene,camera);
-      });
+    function toggleFlash() {
+      if (!videoTrack) return;
+      torchOn = !torchOn;
+      videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
+        .then(() => {
+          document.getElementById('flashBtn').textContent = torchOn ? '🔦ON' : '🔦';
+        });
     }
-
-    function getRadius(){
-      const size = parseFloat(document.getElementById('targetSize').value);
-      const mul = parseFloat(document.getElementById('sizeMultiplier').value);
-      return (size*mul)/1000;
-    }
-
-    function getArray(id){return document.getElementById(id).value.split(',').map(n=>parseFloat(n.trim())).filter(n=>!isNaN(n));}
-
-    function generateDome(radius, azimuths, elevations, pos){
-      if (domeGroup) scene.remove(domeGroup);
-      domeGroup = new THREE.Group();
-
-      const domeMat = new THREE.MeshStandardMaterial({color:0x000000,transparent:true,opacity:0.3,side:THREE.DoubleSide});
-      const domeMesh = new THREE.Mesh(new THREE.SphereGeometry(radius,32,16,0,Math.PI*2,0,Math.PI/2),domeMat);
-      domeGroup.add(domeMesh);
-
-      const geo = new THREE.SphereGeometry(0.03,12,12);
-      const mat = new THREE.MeshBasicMaterial({color:0xffff00});
-      azimuths.forEach(az=>elevations.forEach(el=>{
-        const t = THREE.MathUtils.degToRad(az), p = THREE.MathUtils.degToRad(el);
-        const x = radius*Math.cos(p)*Math.sin(t), y = radius*Math.sin(p), z = radius*Math.cos(p)*Math.cos(t);
-        const m = new THREE.Mesh(geo,mat);
-        m.position.set(x,y,z);
-        m.userData.label = `${az}°, ${el}°`;
-        domeGroup.add(m);
-      }));
-
-      domeGroup.position.copy(pos);
-      scene.add(domeGroup);
-
-      if (transformControls) scene.remove(transformControls);
-      transformControls = new TransformControls(camera, renderer.domElement);
-      transformControls.attach(domeGroup);
-      transformControls.setMode('translate');
-      scene.add(transformControls);
-    }
-
-    function onSceneClick(evt){
-      pointer.x=(evt.clientX/window.innerWidth)*2-1;
-      pointer.y=-(evt.clientY/window.innerHeight)*2+1;
-      raycaster.setFromCamera(pointer,camera);
-      const hits=raycaster.intersectObjects(scene.children,true);
-      if (hits.length>0){
-        const o=hits[0].object;
-        if (o.userData.label){
-          if (!o.userData.sprite){
-            const sp=makeTextSprite(o.userData.label);
-            sp.position.copy(o.position).add(new THREE.Vector3(0,0.05,0)); scene.add(sp); o.userData.sprite=sp;
-          } else { scene.remove(o.userData.sprite); delete o.userData.sprite; }
-        }
-      }
-    }
-
-    function makeTextSprite(txt){
-      const c=document.createElement('canvas'),cx=c.getContext('2d');
-      cx.font='24px sans-serif'; c.width=cx.measureText(txt).width+20; c.height=32;
-      cx.fillStyle='rgba(0,0,0,0.7)'; cx.fillRect(0,0,c.width,c.height);
-      cx.fillStyle='white'; cx.fillText(txt,10,24);
-      const tx=new THREE.CanvasTexture(c), sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx}));
-      sp.scale.set(c.width/200,c.height/200,1); return sp;
-    }
-
-    function toggleFlash(){ if (!videoTrack)return; torchOn=!torchOn;
-      videoTrack.applyConstraints({advanced:[{torch:torchOn}]})
-        .then(()=>document.getElementById('flashBtn').textContent=torchOn?'🔦ON':'🔦');
-    }
-    function onResize(){renderer.setSize(window.innerWidth,window.innerHeight);camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();}
   </script>
 </body>
 </html>

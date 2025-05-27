@@ -1,197 +1,42 @@
-<!DOCTYPE html>
-<html lang="ko">
+<!DOCTYPE html><html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR AR Dome with Hit Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR 카메라 디버그</title>
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; background: #111; color: #eee; }
-    #ui {
-      position: absolute; top: 10px; left: 10px;
-      background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;
-      z-index: 10; max-width: 260px;
-    }
-    #ui label { display: block; font-size: 13px; margin-top: 8px; }
-    #ui input, #ui select {
-      width: 100%; padding: 4px; margin-top: 4px;
-      border-radius: 4px; border: none;
-    }
-    button {
-      margin-top: 10px; width: 100%; padding: 8px;
-      border: none; border-radius: 4px;
-      background: #28a745; color: #fff;
-      font-weight: bold; cursor: pointer;
-    }
-    #flashBtn {
-      position: absolute; bottom: 24px; right: 16px;
-      background: #ffc107; color: #000;
-      padding: 14px 18px; border: none;
-      border-radius: 50%; font-size: 16px;
-      cursor: pointer; z-index: 10;
-      box-shadow: 0 4px 20px #0004;
-    }
-    #reticle {
-      position: absolute;
-      width: 30px; height: 30px;
-      border: 2px solid white; border-radius: 50%;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      z-index: 9;
-    }
+    body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 2rem; }
+    video { width: 100%; max-width: 600px; margin-top: 1rem; background: black; }
+    #log { background: #222; padding: 1rem; border-radius: 6px; margin-top: 1rem; white-space: pre-wrap; font-size: 0.9rem; }
   </style>
 </head>
 <body>
-  <div id="ui">
-    <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
-    <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
-    <label>방위각 (°, 콤마):<br><input type="text" id="azimuths" value="0,90,180,270"></label>
-    <label>고도각 (°, 콤마):<br><input type="text" id="elevations" value="30,45,60"></label>
-    <button id="generate">돔 생성</button>
-  </div>
-  <button id="flashBtn" disabled>🔦</button>
-  <div id="reticle"></div>
+  <h1>📷 WebXR 카메라 테스트</h1>
+  <p>아래에서 카메라 접근 상태를 확인합니다.</p>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="log">로그 출력 중...</div>  <script>
+    const log = msg => document.getElementById('log').textContent += `\n${msg}`;
 
-  <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-    import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
-    import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
-
-    let camera, scene, renderer, controller, reticle, hitTestSource = null, hitTestSourceRequested = false;
-    let domeGroup = null;
-    let videoTrack = null, torchOn = false;
-
-    init();
-
-    function init() {
-      scene = new THREE.Scene();
-
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled = true;
-      document.body.appendChild(renderer.domElement);
-
-      document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
-
-      controller = renderer.xr.getController(0);
-      scene.add(controller);
-
-      // Reticle for AR hit test
-      const geometry = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
-      const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      reticle = new THREE.Mesh(geometry, material);
-      reticle.matrixAutoUpdate = false;
-      reticle.visible = false;
-      scene.add(reticle);
-
-      document.getElementById('generate').addEventListener('click', () => {
-        if (reticle.visible) {
-          const radius = getRadius();
-          const azs = getArray('azimuths');
-          const els = getArray('elevations');
-          generateDome(radius, azs, els, new THREE.Vector3().setFromMatrixPosition(reticle.matrix));
-        }
-      });
-
-      document.getElementById('flashBtn').addEventListener('click', toggleFlash);
-      tryFlashAccess();
-
-      renderer.setAnimationLoop(render);
-    }
-
-    function render(timestamp, frame) {
-      if (frame) {
-        const referenceSpace = renderer.xr.getReferenceSpace();
-        const session = renderer.xr.getSession();
-
-        if (!hitTestSourceRequested) {
-          session.requestReferenceSpace('viewer').then(refSpace => {
-            session.requestHitTestSource({ space: refSpace }).then(source => {
-              hitTestSource = source;
-            });
-          });
-          session.addEventListener('end', () => { hitTestSourceRequested = false; hitTestSource = null; });
-          hitTestSourceRequested = true;
-        }
-
-        if (hitTestSource) {
-          const hitTestResults = frame.getHitTestResults(hitTestSource);
-          if (hitTestResults.length > 0) {
-            const hit = hitTestResults[0];
-            const pose = hit.getPose(referenceSpace);
-            reticle.visible = true;
-            reticle.matrix.fromArray(pose.transform.matrix);
-          } else {
-            reticle.visible = false;
-          }
-        }
-      }
-
-      renderer.render(scene, camera);
-    }
-
-    function getRadius() {
-      const size = parseFloat(document.getElementById('targetSize').value);
-      const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
-      return (size * multiplier) / 1000;
-    }
-
-    function getArray(id) {
-      return document.getElementById(id).value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-    }
-
-    function generateDome(radius, azimuths, elevations, position) {
-      if (domeGroup) scene.remove(domeGroup);
-      domeGroup = new THREE.Group();
-
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
-      );
-      domeGroup.add(dome);
-
-      const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
-      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-
-      azimuths.forEach(az => {
-        elevations.forEach(el => {
-          const theta = THREE.MathUtils.degToRad(az);
-          const phi = THREE.MathUtils.degToRad(el);
-          const x = radius * Math.cos(phi) * Math.sin(theta);
-          const y = radius * Math.sin(phi);
-          const z = radius * Math.cos(phi) * Math.cos(theta);
-          const marker = new THREE.Mesh(markerGeo, markerMat);
-          marker.position.set(x, y, z);
-          marker.userData.label = `${az}°, ${el}°`;
-          domeGroup.add(marker);
-        });
-      });
-
-      domeGroup.position.copy(position);
-      scene.add(domeGroup);
-    }
-
-    async function tryFlashAccess() {
+    async function testCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const constraints = {
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        document.getElementById('video').srcObject = stream;
+
         const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities();
-        if (caps.torch) {
-          videoTrack = track;
-          document.getElementById('flashBtn').disabled = false;
-        }
-      } catch {}
+        const settings = track.getSettings();
+        const capabilities = track.getCapabilities();
+
+        log('✅ 카메라 접근 성공');
+        log(`사용 중인 해상도: ${settings.width}x${settings.height}`);
+        log(`플래시(torch) 지원: ${capabilities.torch ? '예' : '아니오'}`);
+      } catch (err) {
+        log('❌ 카메라 접근 실패');
+        log(err.message);
+      }
     }
 
-    function toggleFlash() {
-      if (!videoTrack) return;
-      torchOn = !torchOn;
-      videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] })
-        .then(() => {
-          document.getElementById('flashBtn').textContent = torchOn ? '🔦ON' : '🔦';
-        });
-    }
-  </script>
-</body>
+    testCamera();
+  </script></body>
 </html>

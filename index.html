@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebXR AR Dome Interactive v2</title>
+  <title>WebXR AR Dome Interactive - Crosshair Fix</title>
   <style>
     body { margin:0; overflow:hidden; font-family:sans-serif; background:#111; color:#eee; }
     #ui {
@@ -15,13 +15,25 @@
     #ui input, #ui select { width:100%; padding:4px; margin-top:4px; border-radius:4px; border:none; }
     button { margin-top:10px; width:100%; padding:8px; border:none; border-radius:4px; background:#28a745; color:#fff; font-weight:bold; cursor:pointer; }
     #flashBtn {
-      position:absolute; top:10px; right:10px;
-      background:#ffc107; color:#000; padding:8px; border:none; border-radius:6px;
-      font-size:14px; cursor:pointer; z-index:10;
+      position:absolute; bottom:24px; right:16px;
+      background:#ffc107; color:#000; padding:14px 18px; border:none; border-radius:50%;
+      font-size:16px; cursor:pointer; z-index:10; box-shadow:0 4px 20px #0004;
+      transition:background 0.2s;
     }
+    #flashBtn:active { background:#e0a800; }
     #crosshair {
-      position:absolute; top:50%; left:50%; width:30px; height:30px;
-      margin:-15px 0 0 -15px; border:2px solid #fff; border-radius:50%; pointer-events:none; z-index:9;
+      position:absolute; top:50%; left:50%; width:36px; height:36px;
+      margin:-18px 0 0 -18px; border:2.5px solid #fff; border-radius:50%; pointer-events:none; z-index:100;
+      background:rgba(0,0,0,0.09);
+      box-shadow:0 0 12px 2px #00f2,0 0 0 3px #111c;
+      display:block;
+    }
+    #crosshair::before {
+      content:'';
+      position:absolute;left:50%;top:50%;
+      transform:translate(-50%,-50%);
+      width:5px; height:5px; border-radius:50%; background:#fff;
+      box-shadow:0 0 7px #00f2,0 0 0 2px #111a;
     }
   </style>
 </head>
@@ -33,7 +45,7 @@
     <label>고도각 (°, 콤마):<br><input type="text" id="elevations" value="30,45,60"></label>
     <button id="generate">돔 생성</button>
   </div>
-  <button id="flashBtn" disabled>Flash OFF</button>
+  <button id="flashBtn" disabled>🔦</button>
   <div id="crosshair"></div>
 
   <script type="module">
@@ -45,6 +57,7 @@
     let videoTrack = null, torchOn = false;
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    let ground;
 
     init();
 
@@ -58,8 +71,8 @@
       document.body.appendChild(renderer.domElement);
       document.body.appendChild(ARButton.createButton(renderer));
 
-      // ground plane for reticle intersection
-      const ground = new THREE.Mesh(
+      // 지면 평면 (드러나지 않음, raycast 용)
+      ground = new THREE.Mesh(
         new THREE.PlaneGeometry(10,10),
         new THREE.MeshBasicMaterial({ visible:false })
       );
@@ -75,20 +88,33 @@
         const radius = getRadius();
         const azs = getArray('azimuths');
         const els = getArray('elevations');
-        // reticle intersection point
-        const cross = document.getElementById('crosshair');
-        // cast ray at center
+        // 레티클 기준 중앙 raycast (지면과 교차점)
         raycaster.setFromCamera({x:0,y:0}, camera);
         const hits = raycaster.intersectObject(ground);
         if (hits.length>0) generateDome(radius, azs, els, hits[0].point);
       };
       document.getElementById('flashBtn').onclick = toggleFlash;
-
       tryFlashAccess();
       window.addEventListener('click', onSceneClick);
       window.addEventListener('resize', onResize);
 
-      renderer.setAnimationLoop(() => renderer.render(scene,camera));
+      // 레티클 위치 시각화: 렌더 루프에서 투명도/명암 살짝 변경
+      renderer.setAnimationLoop(() => {
+        // 교차점 확인
+        raycaster.setFromCamera({x:0,y:0}, camera);
+        const hits = raycaster.intersectObject(ground);
+        const crosshair = document.getElementById('crosshair');
+        if (hits.length>0 && hits[0].distance < 15) {
+          crosshair.style.display = 'block';
+          // 깊이 연출: 가까우면 더 진하게, 멀면 흐리게
+          let o = Math.max(0.11, 0.33-Math.min(hits[0].distance,6)/20);
+          crosshair.style.boxShadow = `0 0 12px 2px #0afc,0 0 0 3px #111c`;
+          crosshair.style.background = `rgba(0,0,0,${o})`;
+        } else {
+          crosshair.style.display = 'none';
+        }
+        renderer.render(scene,camera);
+      });
     }
 
     function getRadius(){
@@ -162,7 +188,7 @@
     }
     function toggleFlash(){ if (!videoTrack)return; torchOn=!torchOn;
       videoTrack.applyConstraints({advanced:[{torch:torchOn}]})
-        .then(()=>document.getElementById('flashBtn').textContent=torchOn?'Flash ON':'Flash OFF');
+        .then(()=>document.getElementById('flashBtn').textContent=torchOn?'🔦ON':'🔦');
     }
     function onResize(){renderer.setSize(window.innerWidth,window.innerHeight);camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();}
   </script>

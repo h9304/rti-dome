@@ -1,42 +1,115 @@
 <!DOCTYPE html><html lang="ko">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR 카메라 디버그</title>
+  <title>RTI 돔 (기본 카메라 방식)</title>
   <style>
-    body { font-family: sans-serif; background: #111; color: #eee; text-align: center; padding: 2rem; }
-    video { width: 100%; max-width: 600px; margin-top: 1rem; background: black; }
-    #log { background: #222; padding: 1rem; border-radius: 6px; margin-top: 1rem; white-space: pre-wrap; font-size: 0.9rem; }
+    body { margin: 0; background: #000; color: #fff; font-family: sans-serif; }
+    #video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    #ui {
+      position: absolute; top: 10px; left: 10px; z-index: 1;
+      background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; max-width: 280px;
+    }
+    label { display: block; font-size: 13px; margin-top: 8px; }
+    input, select { width: 100%; padding: 4px; margin-top: 4px; border-radius: 4px; border: none; }
+    button { margin-top: 10px; width: 100%; padding: 8px; border: none; border-radius: 4px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; }
+    canvas { position: fixed; top: 0; left: 0; z-index: 1; pointer-events: none; }
   </style>
 </head>
 <body>
-  <h1>📷 WebXR 카메라 테스트</h1>
-  <p>아래에서 카메라 접근 상태를 확인합니다.</p>
   <video id="video" autoplay playsinline muted></video>
-  <div id="log">로그 출력 중...</div>  <script>
-    const log = msg => document.getElementById('log').textContent += `\n${msg}`;
+  <div id="ui">
+    <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
+    <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
+    <label>방위각 (°, 콤마):<br><input type="text" id="azimuths" value="0,90,180,270"></label>
+    <label>고도각 (°, 콤마):<br><input type="text" id="elevations" value="30,45,60"></label>
+    <button id="generate">돔 생성</button>
+  </div>
+  <canvas id="canvas"></canvas>  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
-    async function testCamera() {
+    let scene, camera, renderer, domeGroup;
+
+    const canvas = document.getElementById('canvas');
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 1);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5, 5, 5);
+    scene.add(light);
+
+    document.getElementById('generate').onclick = () => {
+      const radius = getRadius();
+      const azs = getArray('azimuths');
+      const els = getArray('elevations');
+      generateDome(radius, azs, els);
+    };
+
+    function getRadius() {
+      const size = parseFloat(document.getElementById('targetSize').value);
+      const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
+      return (size * multiplier) / 1000;
+    }
+
+    function getArray(id) {
+      return document.getElementById(id).value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+    }
+
+    function generateDome(radius, azimuths, elevations) {
+      if (domeGroup) scene.remove(domeGroup);
+      domeGroup = new THREE.Group();
+
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+      );
+      domeGroup.add(dome);
+
+      const markerGeo = new THREE.SphereGeometry(0.01, 8, 8);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+      azimuths.forEach(az => {
+        elevations.forEach(el => {
+          const t = THREE.MathUtils.degToRad(az);
+          const p = THREE.MathUtils.degToRad(el);
+          const x = radius * Math.cos(p) * Math.sin(t);
+          const y = radius * Math.sin(p);
+          const z = radius * Math.cos(p) * Math.cos(t);
+          const marker = new THREE.Mesh(markerGeo, markerMat);
+          marker.position.set(x, y, z);
+          domeGroup.add(marker);
+        });
+      });
+
+      domeGroup.position.set(0, 0, -radius);
+      scene.add(domeGroup);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    async function startCamera() {
       try {
-        const constraints = {
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         document.getElementById('video').srcObject = stream;
-
-        const track = stream.getVideoTracks()[0];
-        const settings = track.getSettings();
-        const capabilities = track.getCapabilities();
-
-        log('✅ 카메라 접근 성공');
-        log(`사용 중인 해상도: ${settings.width}x${settings.height}`);
-        log(`플래시(torch) 지원: ${capabilities.torch ? '예' : '아니오'}`);
-      } catch (err) {
-        log('❌ 카메라 접근 실패');
-        log(err.message);
+      } catch (e) {
+        alert('카메라를 사용할 수 없습니다: ' + e.message);
       }
     }
 
-    testCamera();
+    startCamera();
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
   </script></body>
 </html>

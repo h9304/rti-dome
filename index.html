@@ -1,138 +1,147 @@
-<!DOCTYPE html><html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RTI 돔 위치 지정</title>
-  <style>
-    body { margin: 0; background: #000; color: #fff; font-family: sans-serif; }
-    #video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
-    #ui {
-      position: absolute; top: 10px; left: 10px; z-index: 2;
-      background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; max-width: 300px;
-    }
-    label { display: block; font-size: 13px; margin-top: 8px; }
-    input, select { width: 100%; padding: 4px; margin-top: 4px; border-radius: 4px; border: none; }
-    button { margin-top: 10px; width: 100%; padding: 8px; border: none; border-radius: 4px; background: #28a745; color: #fff; font-weight: bold; cursor: pointer; }
-    canvas { position: fixed; top: 0; left: 0; z-index: 1; }
-    #crosshair {
-      position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
-      margin: -15px 0 0 -15px; border: 2px solid white; border-radius: 50%; pointer-events: none; z-index: 3;
-    }
-  </style>
-</head>
-<body>
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
-  <div id="crosshair"></div>  <div id="ui">
-    <label>대상 크기 (mm):<br><input type="number" id="targetSize" value="100"></label>
-    <label>돔 배율:<br><select id="sizeMultiplier"><option value="2">2×</option><option value="3" selected>3×</option><option value="4">4×</option></select></label>
-    <label>방위각 (°, 콤마):<br><input type="text" id="azimuths" value="0,90,180,270"></label>
-    <label>고도각 (°, 콤마):<br><input type="text" id="elevations" value="30,45,60"></label>
-    <button id="generate">돔 생성</button>
-  </div>  <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RTI Lighting Dome</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/webxr/ARButton.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; font-family: sans-serif; }
+      #flashBtn { position: absolute; top: 10px; right: 10px; z-index: 1; }
+      #inputPanel { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 10px; z-index: 1; }
+    </style>
+  </head>
+  <body>
+    <div id="inputPanel">
+      <label>Target size (mm): <input id="targetSize" type="number" value="100"></label><br>
+      <label>Dome scale (2~4): <input id="domeScale" type="number" value="3" min="2" max="4"></label><br>
+      <label>Azimuths (°, comma-separated): <input id="azimuths" type="text" value="0,45,90,135,180,225,270,315"></label><br>
+      <label>Elevations (°, comma-separated): <input id="elevations" type="text" value="15,30,45,60"></label><br>
+      <button onclick="generateDome()">Generate Dome</button>
+    </div>
+    <button id="flashBtn">Toggle Flash</button>
+    <script>
+      let scene, camera, renderer, controller, domeGroup;
+      let flashOn = false;
 
-    let scene, camera, renderer, domeGroup;
-    let controls;
+      init();
 
-    const canvas = document.getElementById('canvas');
-    renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+      function init() {
+        scene = new THREE.Scene();
 
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.5, 2);
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.target.set(0, 0, 0);
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(5, 5, 5);
-    scene.add(light);
+        document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
 
-    document.getElementById('generate').onclick = () => {
-      const radius = getRadius();
-      const azs = getArray('azimuths');
-      const els = getArray('elevations');
-      generateDome(radius, azs, els);
-    };
+        controller = renderer.xr.getController(0);
+        scene.add(controller);
 
-    function getRadius() {
-      const size = parseFloat(document.getElementById('targetSize').value);
-      const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
-      return (size * multiplier) / 1000;
-    }
+        domeGroup = new THREE.Group();
+        scene.add(domeGroup);
 
-    function getArray(id) {
-      return document.getElementById(id).value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
-    }
+        animate();
+      }
 
-    function generateDome(radius, azimuths, elevations) {
-      if (domeGroup) scene.remove(domeGroup);
-      domeGroup = new THREE.Group();
+      function generateDome() {
+        domeGroup.clear();
 
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
-      );
-      domeGroup.add(dome);
+        const size = parseFloat(document.getElementById('targetSize').value) / 1000; // mm to meters
+        const scale = parseFloat(document.getElementById('domeScale').value);
+        const azimuths = document.getElementById('azimuths').value.split(',').map(Number);
+        const elevations = document.getElementById('elevations').value.split(',').map(Number);
 
-      const markerGeo = new THREE.SphereGeometry(0.01, 8, 8);
-      const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const domeRadius = size * scale / 2;
 
-      azimuths.forEach(az => {
-        elevations.forEach(el => {
-          const t = THREE.MathUtils.degToRad(az);
-          const p = THREE.MathUtils.degToRad(el);
-          const x = radius * Math.cos(p) * Math.sin(t);
-          const y = radius * Math.sin(p);
-          const z = radius * Math.cos(p) * Math.cos(t);
-          const marker = new THREE.Mesh(markerGeo, markerMat);
-          marker.position.set(x, y, z);
-          domeGroup.add(marker);
+        const geometry = new THREE.SphereGeometry(domeRadius, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+        const material = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+        const dome = new THREE.Mesh(geometry, material);
+        domeGroup.add(dome);
+
+        for (let el of elevations) {
+          for (let az of azimuths) {
+            const theta = THREE.MathUtils.degToRad(az);
+            const phi = THREE.MathUtils.degToRad(el);
+
+            const x = domeRadius * Math.sin(phi) * Math.cos(theta);
+            const y = domeRadius * Math.cos(phi);
+            const z = domeRadius * Math.sin(phi) * Math.sin(theta);
+
+            const marker = new THREE.Mesh(
+              new THREE.SphereGeometry(0.005),
+              new THREE.MeshStandardMaterial({ color: 0xffff00 })
+            );
+            marker.position.set(x, y, z);
+
+            const label = makeLabel(`${az}°,${el}°`);
+            label.visible = false;
+            marker.add(label);
+
+            marker.userData.label = label;
+
+            marker.callback = () => {
+              label.visible = !label.visible;
+            };
+
+            domeGroup.add(marker);
+          }
+        }
+
+        // allow drag (rudimentary)
+        let dragging = false;
+        let offset = new THREE.Vector3();
+
+        controller.addEventListener('selectstart', () => { dragging = true; });
+        controller.addEventListener('selectend', () => { dragging = false; });
+        controller.addEventListener('select', () => {
+          domeGroup.children.forEach(obj => {
+            if (obj.callback) {
+              const distance = obj.position.distanceTo(controller.position);
+              if (distance < 0.03) obj.callback();
+            }
+          });
         });
+
+        renderer.setAnimationLoop(() => {
+          if (dragging) domeGroup.position.copy(controller.position);
+          renderer.render(scene, camera);
+        });
+      }
+
+      function makeLabel(text) {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 64;
+        context.fillStyle = 'white';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = 'black';
+        context.font = '24px sans-serif';
+        context.fillText(text, 10, 40);
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({ map: texture });
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(0.1, 0.025, 1);
+        sprite.position.set(0, 0.02, 0);
+        return sprite;
+      }
+
+      document.getElementById('flashBtn').addEventListener('click', () => {
+        flashOn = !flashOn;
+        alert('Flash ' + (flashOn ? 'ON' : 'OFF'));
+        // Note: Direct control of device flashlight is not yet supported in WebXR
+        // Would require native integration or browser support
       });
 
-      const center = getReticleWorldPosition();
-      domeGroup.position.copy(center);
-      scene.add(domeGroup);
-    }
-
-    function getReticleWorldPosition() {
-      const x = 0;
-      const y = 0;
-      const vector = new THREE.Vector3(x, y, 0.5);
-      vector.unproject(camera);
-
-      const dir = vector.sub(camera.position).normalize();
-      const distance = (camera.position.y - 0) / dir.y; // assuming y=0 is the floor
-      return camera.position.clone().sub(dir.multiplyScalar(distance));
-    }
-
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-
-    animate();
-
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        document.getElementById('video').srcObject = stream;
-      } catch (e) {
-        alert('카메라를 사용할 수 없습니다: ' + e.message);
+      function animate() {
+        renderer.setAnimationLoop(() => {
+          renderer.render(scene, camera);
+        });
       }
-    }
-
-    startCamera();
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script></body>
+    </script>
+  </body>
 </html>

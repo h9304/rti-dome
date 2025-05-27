@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v3 Stable - Updated Features)</title>
+    <title>WebXR RTI Dome (v4 Final)</title>
     <style>
         body { 
             margin: 0; 
@@ -360,24 +360,35 @@
                     const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
                     hitTestSource = await session.requestHitTestSource({ 
                         space: viewerReferenceSpace,
-                        entityTypes: ['plane'] // Explicitly request planes
+                        entityTypes: ['plane'] 
                     });
                     if (!hitTestSource) {
-                        showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다. (plane entityTypes)", 4000);
+                        console.warn("Hit-test with entityTypes: ['plane'] failed. Falling back to general hit-test.");
+                        showStatus("표면 감지(plane) 실패, 일반 모드로 시도.", 2000);
+                        hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace }); 
+                         if (!hitTestSource) {
+                            showStatus("표면 감지 기능을 시작할 수 없습니다.", 4000);
+                            console.error("Fallback Hit-test source also failed.");
+                         } else {
+                            console.log("Fallback Hit-test source acquired.");
+                         }
+                    } else {
+                        console.log("Hit-test source with entityTypes: ['plane'] acquired.");
                     }
                 } catch (error) {
-                    console.error("Hit-test source 요청 실패 (plane entityTypes):", error);
-                    // Fallback to general hit-test if plane-specific fails or not supported
-                    try {
+                    console.error("Initial Hit-test source 요청 실패 (plane entityTypes):", error);
+                    try { 
                         const viewerReferenceSpace = await session.requestReferenceSpace('viewer');
                         hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace });
                         if (!hitTestSource) {
-                            showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다. (fallback)", 4000);
+                             showStatus("표면 감지 기능(Hit-test)을 시작할 수 없습니다. (fallback after error)", 4000);
+                             console.error("Fallback Hit-test source also failed after initial error.");
                         } else {
-                            showStatus("표면 감지: 일반 모드로 전환됨.", 2000);
+                            showStatus("표면 감지: 일반 모드로 전환됨 (오류 후).", 2000);
+                            console.log("Fallback Hit-test source acquired after initial error.");
                         }
                     } catch (fallbackError) {
-                        console.error("Fallback Hit-test source 요청 실패:", fallbackError);
+                        console.error("Fallback Hit-test source 요청 실패 (after initial error):", fallbackError);
                         showStatus("Hit-test를 시작할 수 없습니다. AR 기능이 제한될 수 있습니다.", 4000);
                     }
                 }
@@ -424,25 +435,21 @@
                         domeGroup.userData.anchor = anchor;
                         scene.add(domeGroup);
                         showStatus("돔 배치 완료 (앵커 사용).", 3000);
-                        allowReticleUpdate = false; 
-                        reticle.visible = false;
                     }).catch(err => {
                         console.warn("앵커 생성 실패:", err);
                         domeGroup.position.setFromMatrixPosition(hitMatrix);
                         domeGroup.quaternion.setFromRotationMatrix(hitMatrix);
                         scene.add(domeGroup);
                         showStatus("돔 배치 완료 (앵커 실패, 직접 배치).", 3000);
-                        allowReticleUpdate = false; 
-                        reticle.visible = false;
                     });
                 } else { 
                     domeGroup.position.setFromMatrixPosition(hitMatrix);
                     domeGroup.quaternion.setFromRotationMatrix(hitMatrix);
                     scene.add(domeGroup);
                     showStatus("돔 배치 완료 (앵커 정보 없음).", 3000);
-                    allowReticleUpdate = false; 
-                    reticle.visible = false;
                 }
+                allowReticleUpdate = false; 
+                reticle.visible = false;
             } else if (!domeGroup) { 
                 showStatus("돔을 배치할 위치를 탭하세요.", 3000);
                 allowReticleUpdate = true; 
@@ -509,18 +516,19 @@
                     const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
                     marker.position.set(x, y, z);
                     
-                    // Create and add number label by default
                     const numberLabelText = `${markerCount}`;
                     const numberLabelMesh = createTextSprite(numberLabelText, {
-                        fontsize: 24, // Smaller font for numbers
+                        fontsize: 28, 
                         fontface: "Arial",
-                        textColor: { r: 255, g: 255, b: 0, a: 1.0 }, // Yellow numbers
-                        backgroundColor: { r: 0, g: 0, b: 0, a: 0.0 } // Transparent background
+                        textColor: { r: 255, g: 230, b: 100, a: 1.0 }, 
+                        backgroundColor: { r: 0, g: 0, b: 0, a: 0.0 } 
                     });
-                    const numberLabelScaleFactor = actualRadius * 0.035;
-                    numberLabelMesh.scale.set(numberLabelScaleFactor, numberLabelScaleFactor, numberLabelScaleFactor);
-                    const numberLabelOffset = marker.position.clone().normalize().multiplyScalar(markerRadius * 1.8); // Position slightly outwards
-                    numberLabelMesh.position.copy(marker.position).add(numberLabelOffset);
+                    const numberLabelScaleFactor = actualRadius * 0.03;
+                    numberLabelMesh.scale.set(numberLabelScaleFactor, numberLabelScaleFactor * 0.7, numberLabelScaleFactor);
+                    
+                    const offsetDirectionForNumber = marker.position.clone().normalize();
+                    const numberLabelOffset = markerRadius * 2.2; 
+                    numberLabelMesh.position.copy(marker.position).add(offsetDirectionForNumber.multiplyScalar(numberLabelOffset));
                     newDomeGroup.add(numberLabelMesh);
 
                     marker.userData = { 
@@ -528,7 +536,7 @@
                         azimuth: az, 
                         elevation: el, 
                         number: markerCount,
-                        numberLabelMesh: numberLabelMesh, // Store reference
+                        numberLabelMesh: numberLabelMesh, 
                         azElLabelMesh: null, 
                         isAzElLabelVisible: false,
                     };
@@ -552,7 +560,7 @@
                 if (intersects.length > 0) {
                     const firstIntersected = intersects[0].object;
                     if (firstIntersected.userData.isLightMarker) {
-                        toggleMarkerAzElLabel(firstIntersected); // Changed function name
+                        toggleMarkerAzElLabel(firstIntersected);
                         return; 
                     }
                 }
@@ -567,7 +575,6 @@
             }
         }
         
-        // Renamed and modified to handle Az/El label
         function toggleMarkerAzElLabel(marker) {
             marker.userData.isAzElLabelVisible = !marker.userData.isAzElLabelVisible;
 
@@ -575,30 +582,30 @@
                 if (!marker.userData.azElLabelMesh) {
                     const labelText = `${marker.userData.azimuth}°, ${marker.userData.elevation}°`; 
                     marker.userData.azElLabelMesh = createTextSprite(labelText, { 
-                        fontsize: 28, 
+                        fontsize: 26, 
                         fontface: "Arial", 
-                        textColor: { r:255, g:255, b:255, a:1.0 },
-                        backgroundColor: { r:30, g:30, b:30, a:0.8 }
+                        textColor: { r:200, g:255, b:200, a:1.0 }, 
+                        backgroundColor: { r:50, g:50, b:50, a:0.7 }
                     });
                     
                     const domeRadius = domeGroup.children.find(c => c.userData.isDomePart)?.geometry.parameters.radius || 1;
-                    const labelScaleFactor = domeRadius * 0.06; 
-                    marker.userData.azElLabelMesh.scale.set(labelScaleFactor * 2.5, labelScaleFactor, labelScaleFactor); 
+                    const labelScaleFactor = domeRadius * 0.05; 
+                    marker.userData.azElLabelMesh.scale.set(labelScaleFactor * 3, labelScaleFactor * 0.8, labelScaleFactor); 
 
-                    // Position Az/El label slightly below the number label or marker
-                    const offsetDirection = marker.position.clone().normalize(); // Outwards from dome center
-                    const azElLabelOffset = marker.userData.numberLabelMesh.position.clone().sub(marker.position).normalize().multiplyScalar(-0.03); // Example: slightly below number
-                    
-                    // Alternative: Position relative to marker, slightly offset from number
-                    const basePosition = marker.userData.numberLabelMesh.position.clone();
-                    const downOffset = new THREE.Vector3(0, -labelScaleFactor * 1.2, 0); // Offset downwards in sprite's local space (approx)
-                    
-                    // We need to transform this downOffset to world space relative to domeGroup orientation
-                    // This is tricky for sprites. Simpler: position relative to marker.
-                    const azElLabelPosition = marker.position.clone().add(offsetDirection.multiplyScalar(markerRadius * 1.5 + 0.02)); // Slightly further out and lower
-
-                    marker.userData.azElLabelMesh.position.copy(azElLabelPosition);
-                    
+                    // Position Az/El label slightly below and outwards from the number label
+                    if (marker.userData.numberLabelMesh) {
+                        const numberLabelPos = marker.userData.numberLabelMesh.position;
+                        const markerPos = marker.position;
+                        const directionToNumberLabel = new THREE.Vector3().subVectors(numberLabelPos, markerPos).normalize();
+                        // Place Az/El label further along the same direction as number label, then slightly down
+                        marker.userData.azElLabelMesh.position.copy(markerPos)
+                            .add(directionToNumberLabel.multiplyScalar(0.02)) // A bit further than number label
+                            .add(new THREE.Vector3(0, -labelScaleFactor * 0.6, 0)); // And slightly down relative to dome orientation
+                    } else { 
+                        const offsetDirection = marker.position.clone().normalize();
+                        const azElLabelPosition = marker.position.clone().add(offsetDirection.multiplyScalar(0.03));
+                        marker.userData.azElLabelMesh.position.copy(azElLabelPosition);
+                    }
                     domeGroup.add(marker.userData.azElLabelMesh); 
                 }
                 marker.userData.azElLabelMesh.visible = true;
@@ -616,7 +623,7 @@
             const borderColor = parameters.borderColor || { r:0, g:0, b:0, a:0.0 };
             const backgroundColor = parameters.backgroundColor || { r:0, g:0, b:0, a:0.5 };
             const textColor = parameters.textColor || { r:255, g:255, b:255, a:1.0 };
-            const padding = parameters.padding || 8; // Reduced padding for smaller labels
+            const padding = parameters.padding || 8; 
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             context.font = `Bold ${fontsize}px ${fontface}`;
@@ -628,7 +635,7 @@
             context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
             context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
             context.lineWidth = borderThickness;
-            const radius = 6; // Smaller radius
+            const radius = 6; 
             context.beginPath();
             context.moveTo(radius + borderThickness, borderThickness);
             context.lineTo(canvas.width - radius - borderThickness, borderThickness);
@@ -648,9 +655,8 @@
             context.fillText(message, canvas.width / 2, canvas.height / 2);
             const texture = new THREE.CanvasTexture(canvas);
             texture.needsUpdate = true;
-            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: backgroundColor.a < 1.0 });
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: backgroundColor.a < 1.0 || textColor.a < 1.0 });
             const sprite = new THREE.Sprite(spriteMaterial);
-            // Scale based on font size to maintain relative appearance
             sprite.scale.set(canvas.width / (fontsize * 5) , canvas.height / (fontsize * 5), 1.0); 
             return sprite;
         }
@@ -684,8 +690,6 @@
                 renderer.domElement.releasePointerCapture(event.pointerId);
                 showStatus("돔 이동 완료.", 2000);
                 if (domeGroup && domeGroup.userData.anchor) {
-                    // Option: Detach from anchor after drag if desired
-                    // domeGroup.userData.anchor = null; 
                 }
                 allowReticleUpdate = false; 
                 reticle.visible = false;

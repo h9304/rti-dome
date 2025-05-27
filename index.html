@@ -3,36 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR AR Dome Final</title>
+  <title>WebXR Interactive Dome</title>
   <style>
-    body { margin:0; overflow:hidden; font-family:sans-serif; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+    }
     #ui {
-      position:absolute; top:10px; left:10px;
-      background:rgba(255,255,255,0.9);
-      padding:10px; border-radius:8px;
-      z-index:10; max-width:220px;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 12px;
+      border-radius: 8px;
+      z-index: 10;
+      max-width: 260px;
+    }
+    #ui label, #ui select, #ui input {
+      font-size: 13px;
+      display: block;
+      margin-top: 5px;
     }
     #flashBtn {
-      position:absolute; top:10px; right:10px;
-      background:rgba(0,0,0,0.6); color:white;
-      padding:8px; border-radius:6px;
-      font-size:14px; cursor:pointer; z-index:10;
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #ffc107;
+      color: #000;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      z-index: 10;
     }
-    button { margin-top:8px; width:100%; }
+    button {
+      margin-top: 10px;
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 4px;
+      background: #28a745;
+      color: white;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
   <div id="ui">
-    <label>Target Size (mm):<br><input type="number" id="targetSize" value="100"></label><br>
-    <label>Dome Multiplier:<br>
+    <label>Target Size (mm): <input type="number" id="targetSize" value="100"></label>
+    <label>Dome Multiplier:
       <select id="sizeMultiplier">
         <option value="2">2×</option>
         <option value="3" selected>3×</option>
         <option value="4">4×</option>
       </select>
-    </label><br>
-    <label>Azimuths (deg):<br><input type="text" id="azimuths" value="0,90,180,270"></label><br>
-    <label>Elevations (deg):<br><input type="text" id="elevations" value="45"></label><br>
+    </label>
+    <label>Azimuths (deg): <input type="text" id="azimuths" value="0,90,180,270"></label>
+    <label>Elevations (deg): <input type="text" id="elevations" value="30,45,60"></label>
     <button id="generate">Generate Dome</button>
   </div>
   <button id="flashBtn" disabled>Flash OFF</button>
@@ -40,9 +71,9 @@
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
     import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js';
+    import { TransformControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/TransformControls.js';
 
-    let camera, scene, renderer;
-    let domeGroup;
+    let camera, scene, renderer, domeGroup, transformControls;
     let videoTrack = null, torchOn = false;
     let raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
 
@@ -58,16 +89,30 @@
       document.body.appendChild(renderer.domElement);
       document.body.appendChild(ARButton.createButton(renderer));
 
+      // flat ground
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(5, 5),
+        new THREE.MeshStandardMaterial({ color: 0x222222, side: THREE.DoubleSide })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      // light
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(1, 3, 2);
+      scene.add(light);
+
       document.getElementById('generate').addEventListener('click', () => {
         const radius = getRadius();
         const azimuths = getArray('azimuths');
         const elevations = getArray('elevations');
-        generateDome(radius, azimuths, elevations);
+        const pos = new THREE.Vector3(0, 0, -radius).applyQuaternion(camera.quaternion).add(camera.position);
+        generateDome(radius, azimuths, elevations, pos);
       });
 
       document.getElementById('flashBtn').addEventListener('click', toggleFlash);
       window.addEventListener('click', onSceneClick);
-
       tryFlashAccess();
 
       renderer.setAnimationLoop(() => {
@@ -78,25 +123,21 @@
     function getRadius() {
       const size = parseFloat(document.getElementById('targetSize').value);
       const multiplier = parseFloat(document.getElementById('sizeMultiplier').value);
-      return (size * multiplier) / 1000; // convert mm to m
+      return (size * multiplier) / 1000;
     }
 
     function getArray(id) {
       return document.getElementById(id).value.split(',').map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
     }
 
-    function generateDome(radius, azimuths, elevations) {
+    function generateDome(radius, azimuths, elevations, position) {
       if (domeGroup) scene.remove(domeGroup);
       domeGroup = new THREE.Group();
 
-      const domeMat = new THREE.MeshStandardMaterial({
-        color: 0x000000,
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.DoubleSide
-      });
-
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0x000000, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
+      );
       domeGroup.add(dome);
 
       const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
@@ -116,9 +157,14 @@
         });
       });
 
-      const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      domeGroup.position.copy(camera.position).add(direction.multiplyScalar(0.5));
+      domeGroup.position.copy(position);
       scene.add(domeGroup);
+
+      if (transformControls) scene.remove(transformControls);
+      transformControls = new TransformControls(camera, renderer.domElement);
+      transformControls.attach(domeGroup);
+      transformControls.setMode("translate"); // or 'rotate'
+      scene.add(transformControls);
     }
 
     function onSceneClick(e) {

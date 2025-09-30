@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v10 Geodesic Option)</title>
+    <title>WebXR RTI Dome (v11 Geodesic Option)</title>
     <style>
         body { 
             margin: 0; 
@@ -187,7 +187,7 @@
             <label for="domeType">돔 타입:</label>
             <select id="domeType">
                 <option value="free">자유 배치</option>
-                <option value="geodesic">5/8 지오데식 (3v)</option>
+                <option value="geodesic">3v 지오데식 (수정됨)</option>
             </select>
         </div>
         <div class="input-group">
@@ -220,7 +220,7 @@
             <label for="modalDomeType">돔 타입:</label>
             <select id="modalDomeType">
                 <option value="free">자유 배치</option>
-                <option value="geodesic">5/8 지오데식 (3v)</option>
+                <option value="geodesic">3v 지오데식 (수정됨)</option>
             </select>
         </div>
         <div class="input-group">
@@ -550,7 +550,6 @@
             if (domeType === 'geodesic') {
                 const geoGeom = new THREE.IcosahedronGeometry(actualRadius, 3); // 3v
 
-                // Reorient the geometry to have a vertex on top (Y-axis)
                 const t = (1 + Math.sqrt(5)) / 2;
                 const sourceVertex = new THREE.Vector3(0, 1, t).normalize(); 
                 const targetVertex = new THREE.Vector3(0, 1, 0);
@@ -565,37 +564,52 @@
                     const y = vertices.getY(i);
                     const z = vertices.getZ(i);
                     
-                    if (y > -actualRadius * 0.38) { // 5/8 sphere filter
-                        const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
-                        if (!uniqueVertices.has(key)) {
-                            uniqueVertices.set(key, new THREE.Vector3(x, y, z));
-                        }
+                    const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
+                    if (!uniqueVertices.has(key)) {
+                        uniqueVertices.set(key, new THREE.Vector3(x, y, z));
                     }
                 }
 
-                const sortedVertices = Array.from(uniqueVertices.values()).sort((a, b) => {
-                    if (Math.abs(a.y - b.y) > 0.001) {
-                        return b.y - a.y; // Sort from top to bottom
-                    }
-                    return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x); // Then by angle
-                });
-
-                sortedVertices.forEach(pos => {
-                    markerCount++;
-                    const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
-                    marker.position.copy(pos);
+                const prefilteredVertices = Array.from(uniqueVertices.values())
+                    .filter(v => v.y > -actualRadius * 0.38); // 5/8 sphere filter
+                
+                if (prefilteredVertices.length > 0) {
+                    let maxY = -Infinity;
+                    let minY = Infinity;
+                    prefilteredVertices.forEach(v => {
+                        if (v.y > maxY) maxY = v.y;
+                        if (v.y < minY) minY = v.y;
+                    });
                     
-                    marker.userData = { 
-                        isLightMarker: true, 
-                        isGeodesic: true,
-                        coordinates: {x: pos.x, y: pos.y, z: pos.z},
-                        number: markerCount,
-                        azElLabelMesh: null, 
-                        isAzElLabelVisible: false,
-                    };
-                    addNumberLabelToMarker(marker, newDomeGroup, actualRadius);
-                    newDomeGroup.add(marker);
-                });
+                    const tolerance = 0.001;
+                    const finalVertices = prefilteredVertices.filter(v => {
+                        return Math.abs(v.y - maxY) > tolerance && Math.abs(v.y - minY) > tolerance;
+                    });
+
+                    const sortedVertices = finalVertices.sort((a, b) => {
+                        if (Math.abs(a.y - b.y) > tolerance) {
+                            return b.y - a.y; // Sort from top to bottom
+                        }
+                        return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x); // Then by angle
+                    });
+
+                    sortedVertices.forEach(pos => {
+                        markerCount++;
+                        const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
+                        marker.position.copy(pos);
+                        
+                        marker.userData = { 
+                            isLightMarker: true, 
+                            isGeodesic: true,
+                            coordinates: {x: pos.x, y: pos.y, z: pos.z},
+                            number: markerCount,
+                            azElLabelMesh: null, 
+                            isAzElLabelVisible: false,
+                        };
+                        addNumberLabelToMarker(marker, newDomeGroup, actualRadius);
+                        newDomeGroup.add(marker);
+                    });
+                }
 
             } else { // 'free' type
                 (elevations || []).forEach(el => {

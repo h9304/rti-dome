@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v12 Geodesic Final)</title>
+    <title>WebXR RTI Dome (v13 Simplified Radius)</title>
     <style>
         body { 
             margin: 0; 
@@ -191,12 +191,8 @@
             </select>
         </div>
         <div class="input-group">
-            <label for="targetSize">대상 실제 크기 (mm):</label>
-            <input type="number" id="targetSize" value="100">
-        </div>
-        <div class="input-group">
-            <label for="radiusMultiplier">돔 반지름 배율 (대상 크기의 N배, 2-4):</label>
-            <input type="number" id="radiusMultiplier" value="3" min="2" max="4" step="0.1">
+            <label for="domeRadius">돔 반지름 (cm):</label>
+            <input type="number" id="domeRadius" value="30">
         </div>
         <div class="input-group" id="azimuths-group">
             <label for="azimuths">방위각 리스트 (°): (예: 0,45,90)</label>
@@ -224,12 +220,8 @@
             </select>
         </div>
         <div class="input-group">
-            <label for="modalTargetSize">대상 실제 크기 (mm):</label>
-            <input type="number" id="modalTargetSize">
-        </div>
-        <div class="input-group">
-            <label for="modalRadiusMultiplier">돔 반지름 배율 (2-4):</label>
-            <input type="number" id="modalRadiusMultiplier" min="2" max="4" step="0.1">
+            <label for="modalDomeRadius">돔 반지름 (cm):</label>
+            <input type="number" id="modalDomeRadius">
         </div>
         <div class="input-group" id="modal-azimuths-group">
             <label for="modalAzimuths">방위각 리스트 (°):</label>
@@ -268,8 +260,7 @@
         let domeCenterTarget = null;
         
         let domeType = 'free';
-        let targetSize = 100; 
-        let radiusMultiplier = 3;
+        let domeRadiusCm = 30; 
         let azimuths = [];
         let elevations = [];
 
@@ -314,8 +305,7 @@
 
         function syncAndReadInputs() {
             domeType = document.getElementById('domeType').value;
-            targetSize = parseFloat(document.getElementById('targetSize').value) || 100;
-            radiusMultiplier = parseFloat(document.getElementById('radiusMultiplier').value) || 3;
+            domeRadiusCm = parseFloat(document.getElementById('domeRadius').value) || 30;
             azimuths = document.getElementById('azimuths').value.split(',').map(Number).filter(n => !isNaN(n));
             elevations = document.getElementById('elevations').value.split(',').map(Number).filter(n => !isNaN(n));
         }
@@ -522,7 +512,7 @@
 
         function createDome() {
             const newDomeGroup = new THREE.Group();
-            const actualRadius = Math.max(0.01, (targetSize * radiusMultiplier) / 1000); 
+            const actualRadius = Math.max(0.01, domeRadiusCm / 100); // Convert cm to meters
 
             const domeVisualGeometry = new THREE.SphereGeometry(actualRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
             const domeVisualMaterial = new THREE.MeshStandardMaterial({
@@ -808,8 +798,7 @@
         
         function openSettingsModal() {
             document.getElementById('modalDomeType').value = domeType;
-            document.getElementById('modalTargetSize').value = targetSize;
-            document.getElementById('modalRadiusMultiplier').value = radiusMultiplier;
+            document.getElementById('modalDomeRadius').value = domeRadiusCm;
             document.getElementById('modalAzimuths').value = azimuths.join(',');
             document.getElementById('modalElevations').value = elevations.join(',');
             updateDomeTypeUI(domeType, 'modal-');
@@ -818,14 +807,12 @@
         function closeSettingsModal() { settingsModal.style.display = 'none'; }
         function applySettingsFromModal() {
             domeType = document.getElementById('modalDomeType').value;
-            targetSize = parseFloat(document.getElementById('modalTargetSize').value) || 100;
-            radiusMultiplier = parseFloat(document.getElementById('modalRadiusMultiplier').value) || 3;
+            domeRadiusCm = parseFloat(document.getElementById('modalDomeRadius').value) || 30;
             azimuths = document.getElementById('modalAzimuths').value.split(',').map(Number).filter(n => !isNaN(n));
             elevations = document.getElementById('modalElevations').value.split(',').map(Number).filter(n => !isNaN(n));
             
             document.getElementById('domeType').value = domeType;
-            document.getElementById('targetSize').value = targetSize;
-            document.getElementById('radiusMultiplier').value = radiusMultiplier;
+            document.getElementById('domeRadius').value = domeRadiusCm;
             document.getElementById('azimuths').value = azimuths.join(',');
             document.getElementById('elevations').value = elevations.join(',');
             updateDomeTypeUI(domeType);

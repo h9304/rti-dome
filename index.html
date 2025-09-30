@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v13 Simplified Radius)</title>
+    <title>WebXR RTI Dome (v14 Geodesic Fix)</title>
     <style>
         body { 
             margin: 0; 
@@ -251,6 +251,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 
         let camera, scene, renderer;
         let controller;
@@ -512,30 +513,20 @@
 
         function createDome() {
             const newDomeGroup = new THREE.Group();
+            const innerGroup = new THREE.Group(); // All meshes go inside this group for easy offsetting
+            newDomeGroup.add(innerGroup);
+
             const actualRadius = Math.max(0.01, domeRadiusCm / 100); // Convert cm to meters
-
-            const domeVisualGeometry = new THREE.SphereGeometry(actualRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            const domeVisualMaterial = new THREE.MeshStandardMaterial({
-                color: 0x101010, transparent: true, opacity: 0.65, side: THREE.DoubleSide,
-                metalness: 0.1, roughness: 0.9,
-            });
-            const hemisphere = new THREE.Mesh(domeVisualGeometry, domeVisualMaterial);
-            hemisphere.userData.isDomePart = true; 
-            newDomeGroup.add(hemisphere);
-
-            const targetMarkerRadius = actualRadius * 0.05;
-            const targetMarkerGeometry = new THREE.CircleGeometry(targetMarkerRadius, 32);
-            const targetMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
-            domeCenterTarget = new THREE.Mesh(targetMarkerGeometry, targetMarkerMaterial);
-            domeCenterTarget.rotation.x = -Math.PI / 2; 
-            domeCenterTarget.position.y = 0.001; 
-            domeCenterTarget.userData.isCenterTarget = true;
-            newDomeGroup.add(domeCenterTarget);
 
             const markerRadius = Math.max(0.003, actualRadius * 0.025); 
             const markerGeometry = new THREE.SphereGeometry(markerRadius, 12, 6);
             const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xFFD700, metalness: 0.3, roughness: 0.4 });
             let markerCount = 0;
+            
+            const domeVisualMaterial = new THREE.MeshStandardMaterial({
+                color: 0x101010, transparent: true, opacity: 0.65, side: THREE.DoubleSide,
+                metalness: 0.1, roughness: 0.9,
+            });
 
             if (domeType === 'geodesic') {
                 const geoGeom = new THREE.IcosahedronGeometry(actualRadius, 3); // 3v
@@ -548,60 +539,68 @@
                 
                 const vertices = geoGeom.attributes.position;
                 const uniqueVertices = new Map();
-
                 for (let i = 0; i < vertices.count; i++) {
                     const x = vertices.getX(i);
                     const y = vertices.getY(i);
                     const z = vertices.getZ(i);
-                    
                     const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
                     if (!uniqueVertices.has(key)) {
                         uniqueVertices.set(key, new THREE.Vector3(x, y, z));
                     }
                 }
 
-                const prefilteredVertices = Array.from(uniqueVertices.values())
-                    .filter(v => v.y > -actualRadius * 0.38); // 5/8 sphere filter
+                const allDomeVertices = Array.from(uniqueVertices.values())
+                    .filter(v => v.y >= -actualRadius * 0.38); // 5/8 sphere filter
                 
-                if (prefilteredVertices.length > 0) {
-                    let maxY = -Infinity;
+                if (allDomeVertices.length > 0) {
+                    const guideGeom = new ConvexGeometry(allDomeVertices);
+                    const guideMesh = new THREE.Mesh(guideGeom, domeVisualMaterial);
+                    guideMesh.userData.isDomePart = true;
+                    innerGroup.add(guideMesh);
+
                     let minY = Infinity;
-                    prefilteredVertices.forEach(v => {
-                        if (v.y > maxY) maxY = v.y;
+                    allDomeVertices.forEach(v => {
                         if (v.y < minY) minY = v.y;
                     });
-                    
+                    innerGroup.position.y = -minY; 
+
+                    let maxY = -Infinity;
+                    allDomeVertices.forEach(v => {
+                        if (v.y > maxY) maxY = v.y;
+                    });
+
                     const tolerance = 0.001;
-                    const finalVertices = prefilteredVertices.filter(v => {
+                    const markerVertices = allDomeVertices.filter(v => {
                         return Math.abs(v.y - maxY) > tolerance && Math.abs(v.y - minY) > tolerance;
                     });
 
-                    const sortedVertices = finalVertices.sort((a, b) => {
+                    const sortedMarkerVertices = markerVertices.sort((a, b) => {
                         if (Math.abs(a.y - b.y) > tolerance) {
-                            return b.y - a.y; // Sort from top to bottom
+                            return b.y - a.y;
                         }
-                        return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x); // Then by angle
+                        return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x);
                     });
 
-                    sortedVertices.forEach(pos => {
+                    sortedMarkerVertices.forEach(pos => {
                         markerCount++;
                         const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
                         marker.position.copy(pos);
-                        
                         marker.userData = { 
-                            isLightMarker: true, 
-                            isGeodesic: true,
+                            isLightMarker: true, isGeodesic: true,
                             coordinates: {x: pos.x, y: pos.y, z: pos.z},
-                            number: markerCount,
-                            azElLabelMesh: null, 
-                            isAzElLabelVisible: false,
+                            number: markerCount, azElLabelMesh: null, isAzElLabelVisible: false,
                         };
-                        addNumberLabelToMarker(marker, newDomeGroup, actualRadius);
-                        newDomeGroup.add(marker);
+                        addNumberLabelToMarker(marker, innerGroup, actualRadius);
+                        innerGroup.add(marker);
                     });
                 }
 
             } else { // 'free' type
+                const domeVisualGeometry = new THREE.SphereGeometry(actualRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+                const hemisphere = new THREE.Mesh(domeVisualGeometry, domeVisualMaterial);
+                hemisphere.userData.isDomePart = true;
+                innerGroup.add(hemisphere);
+
                 (elevations || []).forEach(el => {
                     (azimuths || []).forEach(az => {
                         if (isNaN(el) || isNaN(az)) return;
@@ -614,22 +613,26 @@
 
                         const marker = new THREE.Mesh(markerGeometry, markerMaterial.clone());
                         marker.position.set(x, y, z);
-                        
                         marker.userData = { 
-                            isLightMarker: true, 
-                            isGeodesic: false,
-                            azimuth: az, 
-                            elevation: el, 
-                            number: markerCount,
-                            azElLabelMesh: null, 
-                            isAzElLabelVisible: false,
+                            isLightMarker: true, isGeodesic: false,
+                            azimuth: az, elevation: el, number: markerCount,
+                            azElLabelMesh: null, isAzElLabelVisible: false,
                         };
-                        addNumberLabelToMarker(marker, newDomeGroup, actualRadius);
-                        newDomeGroup.add(marker);
+                        addNumberLabelToMarker(marker, innerGroup, actualRadius);
+                        innerGroup.add(marker);
                     });
                 });
             }
             
+            const targetMarkerRadius = actualRadius * 0.05;
+            const targetMarkerGeometry = new THREE.CircleGeometry(targetMarkerRadius, 32);
+            const targetMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x888888, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+            domeCenterTarget = new THREE.Mesh(targetMarkerGeometry, targetMarkerMaterial);
+            domeCenterTarget.rotation.x = -Math.PI / 2; 
+            domeCenterTarget.position.y = 0.001; 
+            domeCenterTarget.userData.isCenterTarget = true;
+            innerGroup.add(domeCenterTarget);
+
             newDomeGroup.userData.isDomeRoot = true;
             newDomeGroup.userData.anchor = null; 
             return newDomeGroup;
@@ -698,7 +701,7 @@
                         backgroundColor: { r:50, g:50, b:50, a:0.7 }
                     });
                     
-                    const domeRadius = domeGroup.children.find(c => c.userData.isDomePart)?.geometry.parameters.radius || 1;
+                    const domeRadius = (domeGroup.children[0]?.children.find(c => c.userData.isDomePart)?.geometry.parameters.radius) || 1;
                     const labelScaleFactor = domeRadius * 0.05; 
                     marker.userData.azElLabelMesh.scale.set(labelScaleFactor * (marker.userData.isGeodesic ? 5 : 3), labelScaleFactor * 0.8, labelScaleFactor); 
 
@@ -710,7 +713,7 @@
                         const azElLabelPosition = marker.position.clone().add(offsetDirection.multiplyScalar(0.03));
                         marker.userData.azElLabelMesh.position.copy(azElLabelPosition);
                     }
-                    domeGroup.add(marker.userData.azElLabelMesh); 
+                    domeGroup.children[0].add(marker.userData.azElLabelMesh); 
                 }
                 marker.userData.azElLabelMesh.visible = true;
             } else {
@@ -774,7 +777,7 @@
             const intersects = raycaster.intersectObject(domeGroup, true);
             if (intersects.length > 0) {
                 const firstIntersected = intersects[0].object;
-                if (firstIntersected.userData.isDomePart || domeGroup.children.includes(firstIntersected)) { 
+                if (firstIntersected.userData.isDomePart || domeGroup.children[0].children.includes(firstIntersected)) { 
                     isDraggingDome = true;
                     activePointerId = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);

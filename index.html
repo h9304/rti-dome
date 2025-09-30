@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v14 Geodesic Fix)</title>
+    <title>WebXR RTI Dome (v15 Target Fix)</title>
     <style>
         body { 
             margin: 0; 
@@ -513,10 +513,10 @@
 
         function createDome() {
             const newDomeGroup = new THREE.Group();
-            const innerGroup = new THREE.Group(); // All meshes go inside this group for easy offsetting
+            const innerGroup = new THREE.Group();
             newDomeGroup.add(innerGroup);
 
-            const actualRadius = Math.max(0.01, domeRadiusCm / 100); // Convert cm to meters
+            const actualRadius = Math.max(0.01, domeRadiusCm / 100);
 
             const markerRadius = Math.max(0.003, actualRadius * 0.025); 
             const markerGeometry = new THREE.SphereGeometry(markerRadius, 12, 6);
@@ -529,7 +529,7 @@
             });
 
             if (domeType === 'geodesic') {
-                const geoGeom = new THREE.IcosahedronGeometry(actualRadius, 3); // 3v
+                const geoGeom = new THREE.IcosahedronGeometry(actualRadius, 3);
 
                 const t = (1 + Math.sqrt(5)) / 2;
                 const sourceVertex = new THREE.Vector3(0, 1, t).normalize(); 
@@ -550,7 +550,7 @@
                 }
 
                 const allDomeVertices = Array.from(uniqueVertices.values())
-                    .filter(v => v.y >= -actualRadius * 0.38); // 5/8 sphere filter
+                    .filter(v => v.y >= -actualRadius * 0.38);
                 
                 if (allDomeVertices.length > 0) {
                     const guideGeom = new ConvexGeometry(allDomeVertices);
@@ -562,7 +562,7 @@
                     allDomeVertices.forEach(v => {
                         if (v.y < minY) minY = v.y;
                     });
-                    innerGroup.position.y = -minY; 
+                    innerGroup.position.y = -minY;
 
                     let maxY = -Infinity;
                     allDomeVertices.forEach(v => {
@@ -631,7 +631,7 @@
             domeCenterTarget.rotation.x = -Math.PI / 2; 
             domeCenterTarget.position.y = 0.001; 
             domeCenterTarget.userData.isCenterTarget = true;
-            innerGroup.add(domeCenterTarget);
+            newDomeGroup.add(domeCenterTarget);
 
             newDomeGroup.userData.isDomeRoot = true;
             newDomeGroup.userData.anchor = null; 
@@ -777,7 +777,7 @@
             const intersects = raycaster.intersectObject(domeGroup, true);
             if (intersects.length > 0) {
                 const firstIntersected = intersects[0].object;
-                if (firstIntersected.userData.isDomePart || domeGroup.children[0].children.includes(firstIntersected)) { 
+                if (firstIntersected.userData.isDomePart) {
                     isDraggingDome = true;
                     activePointerId = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>WebXR RTI Dome (v19 Custom Marker 10cm)</title>
+    <title>WebXR RTI Dome (v21 Stable Loading)</title>
     <style>
         body { 
             margin: 0; 
@@ -96,6 +96,10 @@
             font-size: 1.1em !important;
             z-index: 100 !important;
             box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+        }
+        #arButton:disabled {
+            background-color: #555 !important;
+            cursor: not-allowed;
         }
         #statusMessage {
             position: absolute;
@@ -194,10 +198,10 @@
     <div id="mainContainer">
         <div id="marker-info">
              <p><b>필수: AR 마커 준비</b></p>
-             <img id="markerImage" src="./images/markerimg-02-01.jpg" alt="AR Marker">
+             <img id="markerImage" src="https://i.imgur.com/8j9t4tT.jpeg" alt="AR Marker" crossorigin="anonymous">
              <p>1. 위 이미지를 다운로드 받으세요.</p>
              <p>2. 가로 <b>10cm</b> 크기로 인쇄하세요.</p>
-             <a id="downloadMarkerLink" href="./images/markerimg-02-01.jpg" download="rti_marker.jpg">마커 이미지 다운로드</a>
+             <a id="downloadMarkerLink" href="https://i.imgur.com/8j9t4tT.jpeg" download="rti_marker.jpg">마커 이미지 다운로드</a>
         </div>
         <div class="input-group">
             <label for="domeType">돔 타입:</label>
@@ -284,7 +288,6 @@
         const settingsModal = document.getElementById('settingsModal');
         const crosshairEl = document.getElementById('crosshair');
 
-        let markerImageBitmap = null;
         let isDomePlacedByMarker = false;
 
         function showStatus(message, duration = 3000) {
@@ -334,34 +337,42 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
             
-            // Marker image must be loaded before AR Button is created
+            // 1. Create a disabled button immediately
+            const arButtonElement = ARButton.createButton(renderer, {
+                requiredFeatures: ['image-tracking', 'dom-overlay', 'anchors']
+            });
+            arButtonElement.id = 'arButton';
+            arButtonElement.disabled = true;
+            arButtonElement.textContent = "AR 리소스 로딩 중...";
+            document.body.appendChild(arButtonElement);
+            
+            // 2. Load the marker image in the background
             const markerImgEl = document.getElementById('markerImage');
             try {
                 showStatus("마커 이미지 로딩 중...", 0);
-                const response = await fetch(markerImgEl.src);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                const response = await fetch(markerImgEl.src, { mode: 'cors' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 const blob = await response.blob();
-                markerImageBitmap = await createImageBitmap(blob);
+                const markerImageBitmap = await createImageBitmap(blob);
                 
-                const arButtonElement = ARButton.createButton(renderer, {
-                    requiredFeatures: ['image-tracking', 'dom-overlay', 'anchors'], 
-                    trackedImages: [
-                        {
-                            image: markerImageBitmap,
-                            widthInMeters: 0.1 // The physical width of the printed marker (10cm)
-                        }
-                    ],
-                    domOverlay: { root: document.body } 
-                });
-                arButtonElement.id = 'arButton';
-                document.body.appendChild(arButtonElement);
+                // 3. Update the session options with the loaded image
+                renderer.xr.getController(0).userData.sessionInit = {
+                    requiredFeatures: ['image-tracking', 'dom-overlay', 'anchors'],
+                    trackedImages: [{
+                        image: markerImageBitmap,
+                        widthInMeters: 0.1 // The physical width of the printed marker (10cm)
+                    }]
+                };
+
+                // 4. Enable the button and update text
+                arButtonElement.disabled = false;
+                arButtonElement.textContent = "START AR";
                 showStatus("마커 이미지 준비 완료. AR을 시작하세요.", 5000);
 
             } catch (error) {
                 console.error("Failed to load marker image:", error);
-                showStatus("오류: 마커 이미지를 로드할 수 없습니다. 경로를 확인하세요.", 0);
+                arButtonElement.textContent = "오류: AR 시작 불가";
+                showStatus("오류: 마커 이미지를 로드할 수 없습니다. 새로고침하세요.", 0);
             }
 
             controller = renderer.xr.getController(0);
@@ -721,10 +732,8 @@
             
             // Marker tracking logic
             const trackedImages = frame.getImageTrackingResults();
-            let markerFound = false;
             for (const image of trackedImages) {
                 if (image.trackingState == 'tracked') {
-                    markerFound = true;
                     const pose = frame.getPose(image.imageSpace, referenceSpace);
                     if (!isDomePlacedByMarker) {
                          syncAndReadInputs();
@@ -732,7 +741,7 @@
                     placeOrUpdateDome(new THREE.Matrix4().fromArray(pose.transform.matrix));
                     isDomePlacedByMarker = true;
                     if(domeGroup && !domeGroup.visible) domeGroup.visible = true;
-                    break; 
+                    break;
                 }
             }
             
